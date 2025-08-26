@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block head %}
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    .card { max-width: 520px; margin: 16px auto; }
+    .btn { display:inline-block; padding:10px 14px; border-radius:10px; border:1px solid rgba(255,255,255,.15); background:rgba(255,255,255,.06); color:#fff; text-decoration:none; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .muted { opacity:.8 }
+    .ok    { color:#16a34a }
+    .bad   { color:#ef4444 }
+    #autologin { display:none; }
+    pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; }
+  </style>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>Войти через Telegram</h2>
+
+  <div id="autologin" class="muted">Проверяем среду Telegram…</div>
+  <div id="result"></div>
+
+  <div id="fallback" style="display:none; margin-top:12px">
+    <p class="muted">Похоже, страница открыта <b>вне Telegram</b>. Есть два варианта:</p>
+    <ol>
+      <li>Открыть игру внутри Telegram:<br>
+        <a class="btn" href="{{ deep_link }}" target="_blank">Открыть в Telegram</a>
+      </li>
+      <li>Или войти через виджет (браузерный вход):</li>
+    </ol>
+
+    <!-- Login Widget fallback -->
+    <div id="tg-widget"></div>
+    <script async src="https://telegram.org/js/telegram-widget.js?22"
+            data-telegram-login="{{ bot_username }}"
+            data-size="large"
+            data-radius="10"
+            data-auth-url="{{ url_for('accounts.tg_finish', _external=True) }}"
+            data-request-access="write">
+    </script>
+    <p class="muted" style="margin-top:8px">После входа вернёт в игру.</p>
+  </div>
+</section>
+
+<script>
+(function(){
+  const $ = (id) => document.getElementById(id);
+  const autolog = $('autologin');
+  const result  = $('result');
+  const fallback= $('fallback');
+
+  function show(el, yes){ el.style.display = yes ? '' : 'none'; }
+
+  async function tryWebAppLogin(){
+    const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+    show(autolog, true);
+
+    if (!tg) {
+      autolog.innerHTML = '<span class="bad">WebApp SDK не найден</span>: похоже, это не Telegram.';
+      show(fallback, true);
+      return;
+    }
+
+    try {
+      tg.ready(); // безопасно, если уже инициализирован
+    } catch(e){}
+
+    const initData = tg.initData || "";
+    if (!initData) {
+      autolog.innerHTML = '<span class="bad">bad_or_missing_initdata</span>: Telegram не передал initData (вы не в Telegram).';
+      show(fallback, true);
+      return;
+    }
+
+    autolog.innerHTML = 'Нашли WebApp. Пытаемся войти…';
+
+    try {
+      const r = await fetch('{{ url_for("accounts.tg_webapp_finish") }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept':'application/json' },
+        body: 'init_data=' + encodeURIComponent(initData)
+      });
+      const j = await r.json().catch(()=>({ok:false}));
+      if (j && j.ok) {
+        result.innerHTML = '<div class="ok">Готово! Переходим…</div>';
+        const to = j.redirect || '{{ url_for("play.index") }}';
+        window.location.href = to;
+      } else {
+        const msg = (j && j.message) || 'Ошибка входа';
+        result.innerHTML = '<div class="bad">Не удалось войти через WebApp: '+msg+'</div>';
+        show(fallback, true);
+      }
+    } catch (e) {
+      result.innerHTML = '<div class="bad">Ошибка сети: '+ String(e) +'</div>';
+      show(fallback, true);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', tryWebAppLogin);
+  } else {
+    tryWebAppLogin();
+  }
+})();
+</script>
+{% endblock %}

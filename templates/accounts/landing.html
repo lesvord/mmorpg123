@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block head %}
+<style>
+  .hero{padding:40px 16px;background:
+    radial-gradient(1200px 600px at 100% -20%, rgba(52,211,153,.20), transparent 60%),
+    radial-gradient(800px 500px at -10% 20%, rgba(76,166,255,.22), transparent 60%);}
+  .hero h1{margin:0 0 8px;font-size:32px}
+  .hero p{margin:0;color:#cbd5e1}
+  .cta{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+  .btn{background:#1f6feb;color:#fff;border:0;border-radius:12px;padding:12px 16px;font-weight:700}
+  .btn:active{transform:translateY(1px)}
+  .btn.alt{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12)}
+  .btn.green{background:#22c55e}
+  .features{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:16px}
+  .card{background:rgba(255,255,255,.05);border-radius:16px;padding:12px}
+  .tiny{opacity:.8;font-size:12px}
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <h1>Pocket Kingdom</h1>
+  <p>Регистрируйся, собирай снаряжение и покоряй мир.</p>
+  <div class="cta">
+    <a class="btn green" href="/play">Играть</a>
+    <a class="btn" href="/accounts/login">Войти</a>
+    <a class="btn alt" href="/accounts/register">Регистрация</a>
+    <a class="btn alt" href="/accounts/tg/start">Войти через Telegram</a>
+  </div>
+  <div class="tiny" style="margin-top:8px">Вход в игру доступен только авторизованным пользователям.</div>
+</section>
+
+<section class="features">
+  <div class="card"><b>⚔️ Персонаж</b><br>Прокачка, статы и уровни.</div>
+  <div class="card"><b>🎒 Инвентарь</b><br>Предметы, редкости и лут.</div>
+  <div class="card"><b>🛡️ Экипировка</b><br>Слоты и бонусы от вещей.</div>
+  <div class="card"><b>🌦️ Живой мир</b><br>Климат, погода и тайлы.</div>
+</section>
+{% endblock %}

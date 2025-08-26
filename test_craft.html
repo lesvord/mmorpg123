@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест системы крафта</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #1a1a1a; color: #fff; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .section { margin-bottom: 30px; padding: 20px; background: #2a2a2a; border-radius: 8px; }
+        .recipe { border: 1px solid #444; padding: 15px; margin: 10px 0; border-radius: 5px; background: #333; }
+        .btn { padding: 8px 16px; background: #0066cc; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .btn:hover { background: #0055aa; }
+        .status { margin: 10px 0; padding: 10px; background: #444; border-radius: 5px; }
+        .progress { height: 20px; background: #555; border-radius: 10px; overflow: hidden; margin: 10px 0; }
+        .progress-bar { height: 100%; background: #0066cc; transition: width 0.3s ease; }
+        .error { color: #ff6666; }
+        .success { color: #66ff66; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔨 Тест системы крафта</h1>
+        
+        <div class="section">
+            <h2>Статус крафта</h2>
+            <div id="craftStatus" class="status">Загрузка...</div>
+            <div id="craftAction"></div>
+        </div>
+
+        <div class="section">
+            <h2>Доступные рецепты</h2>
+            <div id="recipes">Загрузка рецептов...</div>
+        </div>
+    </div>
+
+    <script>
+        const API = {
+            recipes: '/craft/api/recipes',
+            start: '/craft/api/start',
+            complete: '/craft/api/complete',
+            status: '/craft/api/status',
+            cancel: '/craft/api/cancel'
+        };
+
+        let craftStatus = null;
+        let updateTimer = null;
+
+        async function fetchJSON(url, opts = {}) {
+            try {
+                const r = await fetch(url, opts);
+                const j = await r.json();
+                if (!r.ok) {
+                    console.error('API Error:', j);
+                    return null;
+                }
+                return j;
+            } catch (e) {
+                console.error('Fetch error:', e);
+                return null;
+            }
+        }
+
+        async function loadRecipes() {
+            const data = await fetchJSON(API.recipes);
+            if (!data || !data.ok) {
+                document.getElementById('recipes').innerHTML = '<div class="error">Ошибка загрузки рецептов. Требуется авторизация.</div>';
+                return;
+            }
+
+            const container = document.getElementById('recipes');
+            let html = '';
+
+            for (const [category, recipes] of Object.entries(data.categories)) {
+                html += `<h3>📦 ${category}</h3>`;
+                
+                for (const recipe of recipes) {
+                    const components = recipe.components.map(c => `${c.name} ×${c.qty}`).join(', ');
+                    html += `
+                        <div class="recipe">
+                            <h4>${recipe.name}</h4>
+                            <p><strong>Компоненты:</strong> ${components}</p>
+                            <p><strong>Результат:</strong> ${recipe.result.name} ×${recipe.result.qty}</p>
+                            <p><strong>Время:</strong> ${recipe.craft_time_sec}с</p>
+                            ${recipe.description ? `<p><em>${recipe.description}</em></p>` : ''}
+                            <button class="btn" onclick="startCraft('${recipe.key}')">🔨 Создать</button>
+                        </div>
+                    `;
+                }
+            }
+
+            container.innerHTML = html;
+        }
+
+        async function startCraft(recipeKey) {
+            const result = await fetchJSON(API.start, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ recipe_key: recipeKey })
+            });
+
+            if (!result || !result.ok) {
+                alert(`Ошибка: ${result?.error || 'Неизвестная ошибка'}`);
+                return;
+            }
+
+            alert('Крафт начат!');
+            updateCraftStatus();
+        }
+
+        async function completeCraft() {
+            const result = await fetchJSON(API.complete, { method: 'POST' });
+            if (!result || !result.ok) {
+                alert(`Ошибка: ${result?.error || 'Неизвестная ошибка'}`);
+                return;
+            }
+
+            alert(`Создано: ${result.result?.name || 'Предмет'}`);
+            updateCraftStatus();
+        }
+
+        async function cancelCraft() {
+            const result = await fetchJSON(API.cancel, { method: 'POST' });
+            if (!result || !result.ok) {
+                alert(`Ошибка: ${result?.error || 'Неизвестная ошибка'}`);
+                return;
+            }
+
+            alert('Крафт отменен');
+            updateCraftStatus();
+        }
+
+        async function updateCraftStatus() {
+            const data = await fetchJSON(API.status);
+            if (!data || !data.ok) {
+                document.getElementById('craftStatus').innerHTML = '<div class="error">Ошибка получения статуса</div>';
+                return;
+            }
+
+            const status = data.craft_status;
+            const statusEl = document.getElementById('craftStatus');
+            const actionEl = document.getElementById('craftAction');
+
+            if (status) {
+                const progress = Math.round(status.progress * 100);
+                const remaining = Math.ceil(status.remaining_sec);
+
+                statusEl.innerHTML = `
+                    <div class="success">
+                        <strong>Создается:</strong> ${status.recipe_name}<br>
+                        <strong>Осталось:</strong> ${remaining}с
+                    </div>
+                    <div class="progress">
+                        <div class="progress-bar" style="width: ${progress}%"></div>
+                    </div>
+                `;
+
+                if (status.ready) {
+                    actionEl.innerHTML = '<button class="btn" onclick="completeCraft()">🎯 Забрать готовое</button>';
+                } else {
+                    actionEl.innerHTML = '<button class="btn" onclick="cancelCraft()" style="background: #cc3333;">❌ Отменить</button>';
+                }
+
+                // Обновляем каждую секунду во время крафта
+                if (!updateTimer) {
+                    updateTimer = setInterval(updateCraftStatus, 1000);
+                }
+            } else {
+                statusEl.innerHTML = '<div>Нет активного крафта</div>';
+                actionEl.innerHTML = '';
+                
+                if (updateTimer) {
+                    clearInterval(updateTimer);
+                    updateTimer = null;
+                }
+            }
+        }
+
+        // Инициализация
+        loadRecipes();
+        updateCraftStatus();
+    </script>
+</body>
+</html>

@@ -1,0 +1,508 @@
+{% extends "base.html" %}
+{% block head %}
+<style>
+  .layout { display:grid; grid-template-columns: 320px 1fr; gap:10px; }
+  .panel  { background:rgba(255,255,255,.06); border-radius:12px; padding:12px; margin:10px; }
+  .panel h3{ margin:0 0 10px; font-size:16px }
+  .row    { display:flex; gap:8px; align-items:center; margin:6px 0; }
+  .row > label{ min-width:92px; opacity:.8 }
+  .btn    { background:#1f6feb; color:#fff; border:0; border-radius:10px; padding:8px 12px; font-weight:600; cursor:pointer }
+  .btn.ghost{ background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.15) }
+  .btn.red{ background:#ff4d67 }
+  select, input[type="number"], input[type="text"], input[type="range"] {
+    width:100%; padding:6px 8px; border-radius:8px; border:1px solid rgba(255,255,255,.15); background:rgba(0,0,0,.2); color:#fff;
+  }
+
+  .map-card { margin:10px; padding:8px; border-radius:12px; background:rgba(255,255,255,.05); }
+  svg       { width:100%; height:78vh; touch-action:none; user-select:none; background:#0b0c10; }
+  #cam      { will-change: transform; }
+  .tileimg  { image-rendering: pixelated; }
+  .coords   { font-size:6px; fill:rgba(255,255,255,.9); paint-order:stroke; stroke:#000; stroke-width:.45px }
+  .cursor   { fill:none; stroke:#ffcd4d; stroke-width:1; stroke-dasharray:4 3 }
+  .hover    { fill: rgba(255,255,255,.06); stroke: rgba(255,255,255,.25); stroke-width:1 }
+  .hud      { position:sticky; top:0; z-index:5; padding:6px 8px; background:rgba(0,0,0,.25); backdrop-filter:blur(6px); display:flex; gap:14px; border-radius:10px; margin:10px; align-items:center; flex-wrap:wrap }
+  .small    { opacity:.85; font-size:12px }
+  .kbr      { background:rgba(255,255,255,.12); border-radius:6px; padding:2px 6px; font-size:12px }
+</style>
+{% endblock %}
+{% block content %}
+
+<div class="hud small">
+  <div>ЛКМ — действие режима (клик). СКМ (средняя кнопка/колесо) — перетаскивание. Колесо — масштаб.</div>
+  <div>Центр: x=<b id="cx">0</b> y=<b id="cy">0</b> · зум=<b id="zoom">1.00</b> · чанков=<b id="chunks">1×1</b></div>
+  <div>Наводка: <span id="hover">—</span></div>
+</div>
+
+<div class="layout">
+  <aside class="panel">
+    <h3>Режим</h3>
+    <div class="row">
+      <select id="tool">
+        <option value="inspect">Просмотр</option>
+        <option value="paint">Сменить биом (тайл)</option>
+        <option value="erase">Очистить (травой)</option>
+        <option value="build">Постройка</option>
+        <option value="delbuild">Удалить постройку</option>
+        <option value="climate">Климат чанка</option>
+        <option value="weather">Погода (ключ)</option>
+      </select>
+    </div>
+
+    <div id="rowTile" class="row">
+      <label>Биом</label>
+      <select id="tile">
+        <option>grass</option><option>meadow</option><option>forest</option><option>swamp</option>
+        <option>sand</option><option>desert</option><option>water</option><option>rock</option>
+        <option>snow</option><option>lava</option><option>road</option>
+        <option>town</option><option>tavern</option><option>camp</option>
+      </select>
+    </div>
+
+    <div id="rowBuild" class="row" style="display:none">
+      <label>Постройка</label>
+      <select id="buildKind">
+        <option>town</option><option>tavern</option><option>road</option><option>camp</option>
+      </select>
+    </div>
+
+    <div id="rowWeather" class="row" style="display:none">
+      <label>Погода</label>
+      <input id="weatherKey" type="text" placeholder="clear | rain | fog | storm | snow | heat">
+    </div>
+
+    <div id="rowReason" class="row">
+      <label>Причина</label>
+      <input id="reason" type="text" placeholder="(опционально)">
+    </div>
+
+    <h3>Климат (чанк)</h3>
+    <div class="row"><label>temp</label>  <input id="cl_temp"   type="number" min="0" max="1" step="0.01" value="0.50"></div>
+    <div class="row"><label>moist</label> <input id="cl_moist"  type="number" min="0" max="1" step="0.01" value="0.50"></div>
+    <div class="row"><label>forest</label><input id="cl_forest" type="number" min="0" max="1" step="0.01" value="0.50"></div>
+    <div class="row"><button class="btn" id="btnApplyClimate">Применить к чанкy под курсором</button></div>
+
+    <h3>Скорость времени</h3>
+    <div class="row"><input id="speedRange" type="range" min="0.5" max="8" step="0.5" value="1"></div>
+    <div class="row" style="gap:6px">
+      <button class="btn ghost" data-sp="0.5">0.5×</button>
+      <button class="btn ghost" data-sp="1">1×</button>
+      <button class="btn ghost" data-sp="2">2×</button>
+      <button class="btn ghost" data-sp="4">4×</button>
+      <button class="btn ghost" data-sp="8">8×</button>
+      <button class="btn" id="btnApplySpeed">Применить</button>
+    </div>
+
+    <h3>Инспектор</h3>
+    <div class="small" id="inspector">Кликните по карте в режиме «Просмотр».</div>
+
+    <hr style="opacity:.2;margin:10px 0">
+    <div class="row" style="gap:6px">
+      <button class="btn ghost" id="btnZoomIn">Приблизить</button>
+      <button class="btn ghost" id="btnZoomOut">Отдалить</button>
+      <button class="btn ghost" id="btnCenter">В центр</button>
+      <button class="btn ghost" id="btnRefresh">Обновить</button>
+    </div>
+  </aside>
+
+  <section class="map-card">
+    <svg id="map" viewBox="0 0 270 162" preserveAspectRatio="xMidYMin meet">
+      {% include "_world_defs.html" %}
+      <g id="cam">
+        <g id="tiles"></g>
+        <g id="labels"></g>
+        <g id="hoverRect"></g>
+        <g id="cursorG"></g>
+      </g>
+    </svg>
+  </section>
+</div>
+
+<script>
+/* ==== базовые константы ==== */
+const VIEW_W=270, VIEW_H=162, CELL=18;
+const VARS={ grass:3, meadow:2, forest:3, swamp:2, sand:2, desert:2, water:2, rock:2, snow:2, lava:1, road:1, town:1, tavern:1, camp:1, hero:1 };
+function h2(x,y){ return (((x*73856093)^(y*19349663))>>>0); }
+
+/* ==== состояние ==== */
+const S={
+  camX:0, camY:0, zoom:1,
+  pw:15, ph:9, // размеры патча (узнаем из первого ответа)
+  patches:new Map(), inflight:new Set(),
+  vers: {{ tile_versions|tojson|safe }} || {},
+  resolved:new Map(), bad:new Set(), imgs:new Map(),
+  camG:null, tilesG:null, labelsG:null, hoverG:null, cursorG:null,
+  dragging:false, dragStart:{x:0,y:0}, dragCam:{x:0,y:0},
+  hover:{x:null,y:null}
+};
+
+/* ==== ассеты (выбор форматов) ==== */
+const EXT_ORDER=["avif","webp","png"];
+const SCALE_ORDER=(window.devicePixelRatio||1)>=1.5?["@2x","@1x",""]:["@1x","@2x",""];
+function candidates(tile, idx){ const a=[]; for(const e of EXT_ORDER){for(const s of SCALE_ORDER){a.push(`${tile}_${idx}${s}.${e}`)}} return a }
+function chooseName(tile, idx){
+  const key=`${tile}:${idx}`; const r=S.resolved.get(key); if(r) return r;
+  const list=candidates(tile,idx);
+  for(const n of list){ if(S.bad.has(n)) continue; if(Object.prototype.hasOwnProperty.call(S.vers,n)) return n; }
+  for(const n of list){ if(!S.bad.has(n)) return n; }
+  return list[list.length-1];
+}
+function urlForName(name){ const v=S.vers[name]||Date.now(); return `/static/tiles/${name}?v=${v}`; }
+function ensurePreloaded(tile,idx){
+  const key=`${tile}:${idx}`; const list=candidates(tile,idx);
+  const step=(k)=>{
+    if(k>=list.length) return;
+    const name=list[k]; if(S.bad.has(name)) return step(k+1);
+    const ver=S.vers[name]||0;
+    if(S.imgs.get(name)===ver){ S.resolved.set(key,name); return; }
+    const img=new Image(); img.decoding='async'; img.fetchPriority='low';
+    img.onload=()=>{ S.imgs.set(name,ver); S.resolved.set(key,name); renderAll(); };
+    img.onerror=()=>{ S.bad.add(name); step(k+1); };
+    img.src=urlForName(name);
+  };
+  step(0);
+}
+function haveTile(tile,idx){ const nm=S.resolved.get(`${tile}:${idx}`); if(!nm) return false; return S.imgs.get(nm)===(S.vers[nm]||0) }
+function pngPath(tile,idx){ const nm=S.resolved.get(`${tile}:${idx}`)||chooseName(tile,idx); return urlForName(nm) }
+
+/* ==== API ==== */
+async function fetchPatchAtOrigin(ox,oy){
+  const key=`${ox}:${oy}`; if(S.inflight.has(key) || S.patches.has(key)) return;
+  S.inflight.add(key);
+  try{
+    const cx=ox+Math.floor(S.pw/2), cy=oy+Math.floor(S.ph/2);
+    const r=await fetch(`/admin/patch?cx=${cx}&cy=${cy}`,{headers:{'Cache-Control':'no-cache'}});
+    const j=await r.json();
+    if(j && j.ok){
+      const pt=j.patch; S.pw=pt.w; S.ph=pt.h; S.patches.set(`${pt.ox}:${pt.oy}`, pt);
+      renderAll();
+    }
+  }catch(e){}
+  finally{ S.inflight.delete(key); }
+}
+
+async function adminPost(url, payload){
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload||{})});
+  return r.json().catch(()=>({ok:false}));
+}
+
+async function getChunkInfo(x,y){
+  try{
+    const r=await fetch(`/admin/chunk_info?x=${x}&y=${y}`,{headers:{'Cache-Control':'no-cache'}});
+    if(!r.ok) return null; return r.json();
+  }catch(e){ return null; }
+}
+
+async function setGameSpeed(sp){
+  try{
+    // сначала пробуем админ-версию (если добавишь)
+    let r=await fetch('/admin/time/speed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({speed:sp})});
+    if(r.ok) return true;
+  }catch(e){}
+  // надёжный фоллбек: стандартный эндпоинт из routes_world.py
+  try{
+    let r=await fetch('/world/speed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({speed:sp})});
+    return r.ok;
+  }catch(e){ return false; }
+}
+
+/* ==== покрытие чанками ==== */
+function visibleWorldBounds(){
+  const tilesWide = VIEW_W/(CELL*S.zoom);
+  const tilesHigh = VIEW_H/(CELL*S.zoom);
+  const halfW=tilesWide/2, halfH=tilesHigh/2;
+  return {
+    minX:Math.floor(S.camX-halfW)-1,
+    maxX:Math.ceil (S.camX+halfW)+1,
+    minY:Math.floor(S.camY-halfH)-1,
+    maxY:Math.ceil (S.camY+halfH)+1
+  };
+}
+function neededOrigins(){
+  const b=visibleWorldBounds();
+  const ox0=Math.floor(b.minX/S.pw)*S.pw, oy0=Math.floor(b.minY/S.ph)*S.ph;
+  const ox1=Math.floor(b.maxX/S.pw)*S.pw, oy1=Math.floor(b.maxY/S.ph)*S.ph;
+  const arr=[];
+  for(let oy=oy0; oy<=oy1; oy+=S.ph){
+    for(let ox=ox0; ox<=ox1; ox+=S.pw){
+      arr.push({ox,oy});
+    }
+  }
+  const col=Math.max(1, Math.round((ox1-ox0)/S.pw)+1);
+  const row=Math.max(1, Math.round((oy1-oy0)/S.ph)+1);
+  document.getElementById('chunks').textContent = `${col}×${row}`;
+  return arr;
+}
+function ensureCoverage(){
+  for(const o of neededOrigins()) fetchPatchAtOrigin(o.ox,o.oy);
+}
+
+/* ==== рендер ==== */
+function renderAll(){
+  const b=visibleWorldBounds();
+  const tilesG=S.tilesG, labelsG=S.labelsG;
+  tilesG.innerHTML=''; labelsG.innerHTML='';
+  const drawn=new Set();
+
+  for(const pt of S.patches.values()){
+    const minX=pt.ox, maxX=pt.ox+pt.w-1, minY=pt.oy, maxY=pt.oy+pt.h-1;
+    if(maxX<b.minX||minX>b.maxX||maxY<b.minY||minY>b.maxY) continue;
+
+    for(let j=0;j<pt.h;j++){
+      const gy=pt.oy+j; if(gy<b.minY||gy>b.maxY) continue;
+      for(let i=0;i<pt.w;i++){
+        const gx=pt.ox+i; if(gx<b.minX||gx>b.maxX) continue;
+        const key=`${gx},${gy}`; if(drawn.has(key)) continue; drawn.add(key);
+
+        const tile=pt.tiles[j][i];
+        const n=VARS[tile]||1, idx=n>1?(h2(gx,gy)%n):0;
+        ensurePreloaded(tile,idx);
+
+        const x=(gx-b.minX)*CELL, y=(gy-b.minY)*CELL;
+        if(haveTile(tile,idx)){
+          const img=document.createElementNS('http://www.w3.org/2000/svg','image');
+          img.setAttribute('x',x); img.setAttribute('y',y);
+          img.setAttribute('width',CELL); img.setAttribute('height',CELL);
+          img.setAttribute('preserveAspectRatio','xMidYMid slice');
+          img.setAttribute('class','tileimg');
+          img.setAttributeNS('http://www.w3.org/1999/xlink','href', pngPath(tile,idx));
+          tilesG.appendChild(img);
+        }else{
+          const r=document.createElementNS('http://www.w3.org/2000/svg','rect');
+          r.setAttribute('x',x); r.setAttribute('y',y);
+          r.setAttribute('width',CELL); r.setAttribute('height',CELL);
+          r.setAttribute('fill', `url(#tx-${tile})`);
+          tilesG.appendChild(r);
+        }
+
+        const t=document.createElementNS('http://www.w3.org/2000/svg','text');
+        t.setAttribute('x',x+CELL/2); t.setAttribute('y',y+CELL/2+2);
+        t.setAttribute('text-anchor','middle'); t.setAttribute('class','coords');
+        t.textContent=key; labelsG.appendChild(t);
+      }
+    }
+
+    // постройки
+    for(const bld of (pt.buildings||[])){
+      const gx=bld.x, gy=bld.y;
+      if(gx<b.minX||gx>b.maxX||gy<b.minY||gy>b.maxY) continue;
+      const x=(gx-b.minX)*CELL+1, y=(gy-b.minY)*CELL+1;
+      ensurePreloaded(bld.kind,0);
+      const img=document.createElementNS('http://www.w3.org/2000/svg','image');
+      img.setAttribute('x',x); img.setAttribute('y',y);
+      img.setAttribute('width',CELL-2); img.setAttribute('height',CELL-2);
+      img.setAttribute('preserveAspectRatio','xMidYMid meet');
+      img.setAttribute('class','tileimg');
+      img.setAttributeNS('http://www.w3.org/1999/xlink','href', pngPath(bld.kind,0));
+      tilesG.appendChild(img);
+    }
+  }
+
+  // масштаб всей сцены
+  S.camG.setAttribute('transform', `translate(0,0) scale(${S.zoom})`);
+  document.getElementById('cx').textContent=S.camX.toFixed(2);
+  document.getElementById('cy').textContent=S.camY.toFixed(2);
+  document.getElementById('zoom').textContent=S.zoom.toFixed(2);
+}
+
+/* ==== преобразования координат (точно, без CTM) ==== */
+function clientToViewBox(clientX, clientY){
+  const svg=document.getElementById('map');
+  const rect=svg.getBoundingClientRect();
+  const xView = (clientX - rect.left) * (VIEW_W / rect.width);
+  const yView = (clientY - rect.top)  * (VIEW_H / rect.height);
+  return {xView,yView};
+}
+function worldPointFromClient(clientX, clientY){
+  const {xView,yView} = clientToViewBox(clientX, clientY);
+  const tilesWide = VIEW_W/(CELL*S.zoom);
+  const tilesHigh = VIEW_H/(CELL*S.zoom);
+  const worldLeft = S.camX - tilesWide/2;
+  const worldTop  = S.camY - tilesHigh/2;
+  const lx = xView/(CELL*S.zoom);
+  const ly = yView/(CELL*S.zoom);
+  return { x: Math.floor(worldLeft + lx), y: Math.floor(worldTop + ly) };
+}
+
+/* ==== hover/cursor ==== */
+function showHover(x,y){
+  const g=S.hoverG; g.innerHTML='';
+  const b=visibleWorldBounds();
+  const rx=(x-b.minX)*CELL, ry=(y-b.minY)*CELL;
+  const r=document.createElementNS('http://www.w3.org/2000/svg','rect');
+  r.setAttribute('x',rx); r.setAttribute('y',ry);
+  r.setAttribute('width',CELL); r.setAttribute('height',CELL);
+  r.setAttribute('class','hover'); g.appendChild(r);
+}
+function drawCursor(x,y){
+  const g=S.cursorG; g.innerHTML='';
+  const b=visibleWorldBounds();
+  const rx=(x-b.minX)*CELL+0.5, ry=(y-b.minY)*CELL+0.5;
+  const r=document.createElementNS('http://www.w3.org/2000/svg','rect');
+  r.setAttribute('x',rx); r.setAttribute('y',ry);
+  r.setAttribute('width',CELL-1); r.setAttribute('height',CELL-1);
+  r.setAttribute('class','cursor'); g.appendChild(r);
+}
+
+/* ==== панорамирование/зум ==== */
+function panBy(dxTiles, dyTiles){ S.camX+=dxTiles; S.camY+=dyTiles; ensureCoverage(); renderAll(); }
+
+function onWheel(e){
+  e.preventDefault();
+  const z = (e.deltaY>0) ? 0.9 : 1.1;
+  const oldZ=S.zoom; S.zoom=Math.max(0.25, Math.min(6, S.zoom*z));
+
+  const svg=document.getElementById('map');
+  const rect=svg.getBoundingClientRect();
+  const xView=(e.clientX-rect.left)*(VIEW_W/rect.width);
+  const yView=(e.clientY-rect.top )*(VIEW_H/rect.height);
+
+  const tilesWide1 = VIEW_W/(CELL*oldZ), tilesHigh1 = VIEW_H/(CELL*oldZ);
+  const worldLeft1 = S.camX - tilesWide1/2, worldTop1  = S.camY - tilesHigh1/2;
+  const worldX = worldLeft1 + (xView/(CELL*oldZ));
+  const worldY = worldTop1  + (yView/(CELL*oldZ));
+
+  const tilesWide2 = VIEW_W/(CELL*S.zoom), tilesHigh2 = VIEW_H/(CELL*S.zoom);
+  const worldLeft2 = worldX - (xView/(CELL*S.zoom));
+  const worldTop2  = worldY - (yView/(CELL*S.zoom));
+  S.camX = worldLeft2 + tilesWide2/2;
+  S.camY = worldTop2  + tilesHigh2/2;
+
+  ensureCoverage(); renderAll();
+}
+
+/* MMB drag only */
+function onMouseDown(e){
+  if(e.button!==1) return; // только средняя кнопка
+  e.preventDefault();
+  S.dragging=true;
+  S.dragStart={x:e.clientX,y:e.clientY};
+  S.dragCam={x:S.camX,y:S.camY};
+}
+function onMouseMove(e){
+  const p=worldPointFromClient(e.clientX,e.clientY);
+  S.hover=p; document.getElementById('hover').textContent=`${p.x},${p.y}`;
+  showHover(p.x,p.y);
+
+  if(!S.dragging) return;
+  const dxPx=e.clientX-S.dragStart.x, dyPx=e.clientY-S.dragStart.y;
+  const dx=-dxPx/(CELL*S.zoom) * (VIEW_W / document.getElementById('map').getBoundingClientRect().width);
+  const dy=-dyPx/(CELL*S.zoom) * (VIEW_H / document.getElementById('map').getBoundingClientRect().height);
+  S.camX=S.dragCam.x+dx; S.camY=S.dragCam.y+dy;
+  ensureCoverage(); renderAll();
+}
+function onMouseUp(){ S.dragging=false; }
+
+/* ==== инструменты ==== */
+function updateToolUI(){
+  const t=document.getElementById('tool').value;
+  document.getElementById('rowTile').style.display = (t==='paint' || t==='erase') ? '' : (t==='inspect'?'none':'');
+  document.getElementById('rowBuild').style.display = (t==='build')?'':'none';
+  document.getElementById('rowWeather').style.display = (t==='weather')?'':'none';
+}
+
+async function applyAt(x,y){
+  const tool=document.getElementById('tool').value;
+  if(tool==='inspect'){ await fillInspector(x,y); return; }
+  if(tool==='paint'){
+    const tile=document.getElementById('tile').value, reason=document.getElementById('reason').value;
+    const r=await adminPost('/admin/set_tile',{x,y,tile,reason}); if(r.ok){ ensureCoverage(); renderAll(); }
+  }
+  if(tool==='erase'){
+    const reason=document.getElementById('reason').value;
+    const r=await adminPost('/admin/clear_tile',{x,y,reason}); if(r.ok){ ensureCoverage(); renderAll(); }
+  }
+  if(tool==='build'){
+    const kind=document.getElementById('buildKind').value;
+    const r=await adminPost('/admin/set_building',{x,y,kind}); if(r.ok){ ensureCoverage(); renderAll(); }
+  }
+  if(tool==='delbuild'){
+    const r=await adminPost('/admin/del_building',{x,y}); if(r.ok){ ensureCoverage(); renderAll(); }
+  }
+  if(tool==='climate'){
+    const t=parseFloat(document.getElementById('cl_temp').value||'0'), m=parseFloat(document.getElementById('cl_moist').value||'0'), f=parseFloat(document.getElementById('cl_forest').value||'0');
+    const r=await adminPost('/admin/set_climate',{x,y,temp:t,moist:m,forest:f}); if(r.ok){ ensureCoverage(); renderAll(); }
+  }
+  if(tool==='weather'){
+    const key=(document.getElementById('weatherKey').value||'').trim()||'clear';
+    const r=await adminPost('/admin/set_weather',{x,y,key}); if(r.ok){ ensureCoverage(); renderAll(); }
+  }
+}
+
+async function fillInspector(x,y){
+  drawCursor(x,y);
+  const el=document.getElementById('inspector');
+  let tile='?', build='—';
+  for(const pt of S.patches.values()){
+    if(x>=pt.ox && x<pt.ox+pt.w && y>=pt.oy && y<pt.oy+pt.h){
+      tile = pt.tiles[y-pt.oy][x-pt.ox];
+      if(pt.buildings && pt.buildings.length){
+        const b = pt.buildings.find(b=>b.x===x && b.y===y);
+        if(b) build=b.kind;
+      }
+      break;
+    }
+  }
+  let climate='—', weather='—';
+  const info = await getChunkInfo(x,y);
+  if(info && info.ok){
+    const c=info.climate||{}; climate=`temp:${(c.temp??0).toFixed(2)} moist:${(c.moist??0).toFixed(2)} forest:${(c.forest_density??0).toFixed(2)}`;
+    const w=info.weather||{}; weather=w.key||w.name||'clear';
+  }
+  el.textContent = `(${x},${y}) · тайл=${tile} · постройка=${build} · климат=${climate} · погода=${weather}`;
+}
+
+/* ==== init ==== */
+function bindUI(){
+  document.getElementById('btnZoomIn').onclick = ()=>{ onWheel({preventDefault:()=>{}, deltaY:-1, clientX:window.innerWidth/2, clientY:window.innerHeight/2}) };
+  document.getElementById('btnZoomOut').onclick= ()=>{ onWheel({preventDefault:()=>{}, deltaY:+1, clientX:window.innerWidth/2, clientY:window.innerHeight/2}) };
+  document.getElementById('btnCenter').onclick = ()=>{ S.camX=0; S.camY=0; ensureCoverage(); renderAll(); };
+  document.getElementById('btnRefresh').onclick= ()=>{ S.patches.clear(); ensureCoverage(); renderAll(); };
+  document.getElementById('tool').onchange = updateToolUI;
+
+  document.getElementById('btnApplyClimate').onclick= async ()=>{
+    if(S.hover.x==null) return;
+    await applyAt(S.hover.x,S.hover.y);
+  };
+
+  document.getElementById('btnApplySpeed').onclick = async ()=>{
+    const v=parseFloat(document.getElementById('speedRange').value||'1');
+    const ok=await setGameSpeed(v); alert(ok?'OK':'Не удалось');
+  };
+  for(const b of document.querySelectorAll('[data-sp]')){
+    b.onclick=()=>{ document.getElementById('speedRange').value=b.dataset.sp; };
+  }
+}
+
+function attachMapHandlers(){
+  const svg=document.getElementById('map');
+  svg.addEventListener('contextmenu', e=>e.preventDefault());
+  svg.addEventListener('wheel', onWheel, {passive:false});
+  svg.addEventListener('mousedown', onMouseDown);
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseup', onMouseUp);
+  svg.addEventListener('click', (e)=>{ if(e.button!==0) return; const p=worldPointFromClient(e.clientX,e.clientY); applyAt(p.x,p.y); });
+}
+
+async function init(){
+  S.camG=document.getElementById('cam');
+  S.tilesG=document.getElementById('tiles');
+  S.labelsG=document.getElementById('labels');
+  S.hoverG=document.getElementById('hoverRect');
+  S.cursorG=document.getElementById('cursorG');
+
+  bindUI(); attachMapHandlers(); updateToolUI();
+
+  await fetchPatchAtOrigin(0,0); // узнаём pw/ph
+  ensureCoverage(); renderAll();
+
+  setInterval(async ()=>{
+    try{
+      const r=await fetch('/admin/tile_versions',{headers:{'Cache-Control':'no-cache'}});
+      const j=await r.json();
+      if(j&&j.ok&&j.versions){ for(const [fn,v] of Object.entries(j.versions)){ S.vers[fn]=v; } renderAll(); }
+    }catch(e){}
+  }, 10000);
+}
+document.addEventListener('DOMContentLoaded', init);
+</script>
+{% endblock %}

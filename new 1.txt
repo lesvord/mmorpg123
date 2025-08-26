@@ -1,0 +1,61 @@
+
+ssh root@95.164.23.186
+cd /var/www/pocketkingdom
+
+
+sudo systemctl daemon-reload
+sudo systemctl restart pocketkingdom
+sudo systemctl reload pocketkingdom
+journalctl -u pocketkingdom -f
+
+
+
+
+/static/tiles/
+  grass_0.png   grass_1.png   grass_2.png +
+  meadow_0.png  meadow_1.png +
+  forest_0.png  forest_1.png  forest_2.png +
+  swamp_0.png   swamp_1.png
+  sand_0.png    sand_1.png +
+  desert_0.png  desert_1.png +
+  water_0.png   water_1.png +
+  rock_0.png    rock_1.png
+  snow_0.png    snow_1.png
+  lava_0.png
+  road_0.png
+  camp_0.png
+  town_0.png
+  tavern_0.png
+
+
+grass_snow_0.avif+   grass_snow_0@2x.avif
+meadow_snow_0.avif+  meadow_snow_0@2x.avif
+forest_snow_0.avif +  forest_snow_1.avif  forest_snow_2.avif
+swamp_snow_0.avif +
+sand_snow_0.avif +
+desert_snow_0.avif+
+rock_snow_0.avif +
+road_snow_0.avif
+town_snow_0.avif
+tavern_snow_0.avif
+camp_snow_0.avif
+water_ice_0.avif+
+
+
+
+
+
+
+
+
+
+systemctl daemon-reload
+systemctl start tg_zak
+systemctl enable tg_zak
+
+
+journalctl -u tg_zak -f
+
+
+systemctl restart tg_zak
+systemctl status tg_zak --no-pager

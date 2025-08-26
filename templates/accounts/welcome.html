@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block head %}
+<style>
+  .hero{display:grid;place-items:center;min-height:70vh;text-align:center;padding:24px}
+  .hero h1{font-size:48px;line-height:1.1;margin:10px 0}
+  .hero p{opacity:.85;max-width:640px;margin:8px auto 18px}
+  .cta{display:flex;gap:10px;justify-content:center;margin-top:10px}
+  .cta .btn{font-size:16px;padding:12px 16px;border-radius:14px}
+  .glass{background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.04));
+         border:1px solid rgba(255,255,255,.12); border-radius:18px; padding:18px; max-width:800px}
+</style>
+{% endblock %}
+{% block content %}
+<section class="hero">
+  <div class="glass">
+    <h1>Pocket Kingdom</h1>
+    <p>Исследуй мир, собирай снаряжение и прокачивайся. Создай аккаунт — и вперёд в приключение.</p>
+    <div class="cta">
+      <a class="btn" style="background:#34d399;color:#041b10" href="{{ url_for('accounts.register_page') }}">Регистрация</a>
+      <a class="btn" style="background:#1f6feb" href="{{ url_for('accounts.login_page') }}">Войти</a>
+      <a class="btn" style="background:rgba(255,255,255,.08)" href="{{ url_for('world.page') if 'world.page' in current_app.view_functions else '#' }}">В мир</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

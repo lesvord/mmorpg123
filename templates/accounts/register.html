@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block head %}
+<style>
+  .wrap{max-width:480px;margin:32px auto}
+  form{display:grid;gap:10px}
+  .inp{padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:rgba(0,0,0,.2);color:#fff}
+  .btn{background:#22c55e;color:#0a0a0a;border:0;border-radius:12px;padding:12px 16px;font-weight:800}
+  .hint{opacity:.85;font-size:14px}
+</style>
+{% endblock %}
+{% block content %}
+<div class="wrap card">
+  <h2 style="margin-top:0">Регистрация</h2>
+  {% with m=get_flashed_messages() %}{% if m %}
+    <div class="hint">{{ m[0] }}</div>
+  {% endif %}{% endwith %}
+  <form method="post" action="">
+    <input class="inp" type="email"    name="email"    placeholder="Email" required>
+    <input class="inp" type="text"     name="username" placeholder="Никнейм" minlength="3" maxlength="40" required>
+    <input class="inp" type="password" name="password" placeholder="Пароль" minlength="6" required>
+    <button class="btn" type="submit">Создать аккаунт</button>
+  </form>
+  <div class="hint" style="margin-top:10px">
+    Уже есть аккаунт? <a href="/accounts/login">Войти</a>
+  </div>
+</div>
+{% endblock %}

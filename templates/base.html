@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>Pocket Kingdom</title>
+  <style>
+    :root { color-scheme: dark; }
+    html,body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji','Segoe UI Emoji','Segoe UI Symbol'; }
+    body { background:#0b0c10; color:#fff; }
+    .card { background: rgba(255,255,255,.05); border-radius:16px; padding:12px; margin:10px; }
+    .row { display:flex; align-items:center; gap:8px; }
+    .row.space { justify-content: space-between; }
+    .pill { padding:6px 10px; background:rgba(255,255,255,.08); border-radius:999px; }
+    .btn { background:#1f6feb; color:#fff; border:0; border-radius:12px; padding:10px 14px; font-weight:600; }
+    .btn:active { transform: translateY(1px); }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body>
+  {% block content %}{% endblock %}
+
+  <!-- Регистрация Service Worker для предкэша тайлов (ускоряет повторные визиты и офлайн) -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/static/sw.js').catch(()=>{});
+    }
+  </script>
+</body>
+</html>
