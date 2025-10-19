@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import random
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from flask import Blueprint, request, jsonify, g
 
 from models import db
 from world_models import ensure_world_models, WorldState
-from accounts.models import ItemDef, give_item, inventory_totals
+from accounts.models import ItemDef, PlayerProfile, give_item, inventory_totals
 from routes_world import get_world_state  # авторитетное состояние (тайл/погода/усталость)
 from gathering_tables import (
     DEFAULT_MODE_KEY,
@@ -82,12 +82,56 @@ def _weather_difficulty(weather: dict) -> float:
     precip_penalty = 0.2 if weather.get("precip") in {"rain", "snow"} else 0.0
     return max(0.0, min(1.0, temp_penalty + wind_penalty + precip_penalty))
 
-def _gather_profile(mode, biome: str, weather: dict, load_totals: dict) -> dict:
+def _player_stats(uid: int) -> Dict[str, float]:
+    try:
+        row = PlayerProfile.query.filter_by(user_id=uid).first()
+        if not row:
+            return {}
+        snap = row.as_dict()
+        # Добавим явные алиасы для удобства вычислений
+        snap.setdefault("level", snap.get("lvl", row.level))
+        snap.setdefault("str", getattr(row, "str_", snap.get("str", 5)))
+        snap.setdefault("agi", getattr(row, "agi", snap.get("agi", 5)))
+        snap.setdefault("vit", getattr(row, "vit", snap.get("vit", 5)))
+        snap.setdefault("luck", getattr(row, "luck", snap.get("luck", 1)))
+        return snap
+    except Exception:
+        return {}
+
+
+def _gather_profile(mode, biome: str, weather: dict, load_totals: dict, player_stats: Optional[Dict[str, float]] = None) -> dict:
     load_frac = _load_fraction(load_totals)
     weather_diff = _weather_difficulty(weather)
 
+    stats = player_stats or {}
+    level = max(1, int(stats.get("level") or stats.get("lvl") or 1))
+    str_score = max(1, int(stats.get("str") or stats.get("str_", 5)))
+    agi_score = max(1, int(stats.get("agi") or 5))
+    vit_score = max(1, int(stats.get("vit") or 5))
+    luck_score = max(0, int(stats.get("luck") or 0))
+
+    gather_skill = (str_score * 0.45) + (agi_score * 0.55) + (luck_score * 0.25) + (level * 0.9)
+    baseline_skill = (5 * 0.45) + (5 * 0.55) + (1 * 0.25) + (1 * 0.9)
+    skill_ratio = gather_skill / baseline_skill if baseline_skill else 1.0
+    skill_ratio = max(0.45, min(2.2, skill_ratio))
+
+    speed_mod = 1.0 - (skill_ratio - 1.0) * 0.35
+    speed_mod = max(0.55, min(1.35, speed_mod))
+
+    endurance_score = (str_score * 0.6) + (vit_score * 0.4)
+    baseline_endurance = (5 * 0.6) + (5 * 0.4)
+    endurance_ratio = endurance_score / baseline_endurance if baseline_endurance else 1.0
+    endurance_ratio = max(0.4, min(2.2, endurance_ratio))
+    fatigue_stat_mod = 1.0 - (endurance_ratio - 1.0) * 0.3
+    fatigue_stat_mod = max(0.55, min(1.35, fatigue_stat_mod))
+
+    luck_bonus = min(0.22, max(0.0, luck_score * 0.006 + agi_score * 0.0025))
+    chain_bonus = min(0.18, max(0.0, luck_score * 0.003))
+
     windup = DEFAULT_WINDUP_MS * (1.0 + load_frac * 0.6 + weather_diff * 0.35)
     tick_ms = BASE_TICK_MS * (1.0 + load_frac * 0.55 + weather_diff * 0.25)
+    windup *= speed_mod
+    tick_ms *= speed_mod * (0.88 + min(0.08, level * 0.01))
     tick_ms = max(MIN_TICK_MS, tick_ms)
 
     bonus_base = 0.35
@@ -99,22 +143,34 @@ def _gather_profile(mode, biome: str, weather: dict, load_totals: dict) -> dict:
         bonus_base += 0.05
 
     bonus_chance = max(0.02, bonus_base - load_frac * 0.28 - weather_diff * 0.22)
-    bonus_chain = max(0.0, bonus_chance - 0.18)
+    bonus_chance = min(0.9, bonus_chance + luck_bonus)
+    bonus_chain = max(0.0, bonus_chance - 0.18 + chain_bonus)
 
-    fatigue_mul = float(weather.get("fatigue_mul") or 1.0)
+    weather_fatigue = float(
+        weather.get("fatigue_mul")
+        or (weather.get("mods") or {}).get("fatigue_mul")
+        or 1.0
+    )
     load_mul = float(load_totals.get("fatigue_mul") or 1.0)
+    combined_fatigue = weather_fatigue * load_mul * fatigue_stat_mod
 
     return {
         "windup_ms": round(windup),
         "tick_ms": round(tick_ms),
         "bonus_chance": bonus_chance,
         "bonus_chain": bonus_chain,
-        "fatigue_multiplier": fatigue_mul * load_mul,
+        "fatigue_multiplier": combined_fatigue,
         "load_frac": load_frac,
         "weather_diff": weather_diff,
+        "stat_mods": {
+            "skill_ratio": round(skill_ratio, 3),
+            "speed_mod": round(speed_mod, 3),
+            "fatigue_mod": round(fatigue_stat_mod, 3),
+            "luck_bonus": round(luck_bonus, 3),
+        },
     }
 
-def _miss_chance(weather_kind: str, biome: str) -> float:
+def _miss_chance(weather_kind: str, biome: str, player_stats: Optional[Dict[str, float]] = None) -> float:
     w = (weather_kind or "").lower()
     miss = BASE_MISS
     if w == "storm": miss += 0.15
@@ -123,6 +179,11 @@ def _miss_chance(weather_kind: str, biome: str) -> float:
     elif w == "heat": miss += 0.04
     if biome in ("water","swamp") and w in ("rain","storm"): miss -= 0.05
     if biome == "rock" and w in ("rain","storm"): miss += 0.04
+    if player_stats:
+        agi_score = max(1, int(player_stats.get("agi") or 0))
+        luck_score = max(0, int(player_stats.get("luck") or 0))
+        lvl = max(1, int(player_stats.get("level") or player_stats.get("lvl") or 1))
+        miss -= min(0.2, max(0.0, (agi_score - 5) * 0.015 + luck_score * 0.004 + (lvl - 1) * 0.003))
     return max(0.15, min(0.70, miss))
 
 def _weighted_pick(table: Tuple[DropK, ...]) -> Optional[str]:
@@ -201,12 +262,13 @@ def _gather_tick(uid: int, mode_key: str = DEFAULT_MODE_KEY):
     fatigue_per_tile = float(mods.get("fatigue_per_tile") or 0.8)  # «цена шага»
 
     totals = inventory_totals(uid)
-    load_mul = float(totals.get("fatigue_mul") or 1.0)
+    stats = _player_stats(uid)
     mode = normalize_mode(mode_key)
 
-    profile = _gather_profile(mode, biome, weather, totals)
+    profile = _gather_profile(mode, biome, weather, totals, stats)
 
-    base_cost = fatigue_per_tile * GATHER_BASE_FACTOR * load_mul    # «цена тика добычи»
+    fatigue_mul = float(profile.get("fatigue_multiplier") or 1.0)
+    base_cost = fatigue_per_tile * GATHER_BASE_FACTOR * fatigue_mul    # «цена тика добычи»
 
     cur_fat = float(ws.get("fatigue") or 0.0)
     if cur_fat >= 100.0 - 1e-6:
@@ -214,6 +276,7 @@ def _gather_tick(uid: int, mode_key: str = DEFAULT_MODE_KEY):
             "ok": True, "items": [], "message": "Вы выдохлись.",
             "fatigue": cur_fat, "totals": totals, "mode": mode.key,
             "profile": profile,
+            "player_stats": stats,
         }
 
     # запретная зона — только base_cost
@@ -222,11 +285,13 @@ def _gather_tick(uid: int, mode_key: str = DEFAULT_MODE_KEY):
         return {
             "ok": True, "items": [], "message": "Здесь нечего добывать.",
             "fatigue": new_fat, "fatigue_base": base_cost, "fatigue_extra": 0.0,
-            "totals": inventory_totals(uid), "mode": mode.key
+            "totals": inventory_totals(uid), "mode": mode.key,
+            "profile": profile,
+            "player_stats": stats,
         }
 
     # промах — только base_cost
-    miss_adj = _miss_chance(weather_kind, biome)
+    miss_adj = _miss_chance(weather_kind, biome, stats)
     # Нагрузка и погода снижают точность
     miss_adj += profile["load_frac"] * 0.18 + profile["weather_diff"] * 0.22
     miss_adj = max(0.10, min(0.82, miss_adj))
@@ -238,6 +303,7 @@ def _gather_tick(uid: int, mode_key: str = DEFAULT_MODE_KEY):
             "fatigue": new_fat, "fatigue_base": base_cost, "fatigue_extra": 0.0,
             "totals": totals, "mode": mode.key,
             "profile": profile,
+            "player_stats": stats,
         }
 
     # успех: 1 предмет ×1
@@ -251,6 +317,7 @@ def _gather_tick(uid: int, mode_key: str = DEFAULT_MODE_KEY):
             "fatigue": new_fat, "fatigue_base": base_cost, "fatigue_extra": 0.0,
             "totals": totals, "mode": mode.key,
             "profile": profile,
+            "player_stats": stats,
         }
 
     # пробуем положить в БД-инвентарь
@@ -270,6 +337,7 @@ def _gather_tick(uid: int, mode_key: str = DEFAULT_MODE_KEY):
             "fatigue": new_fat, "fatigue_base": base_cost, "fatigue_extra": 0.0,
             "totals": totals, "mode": mode.key,
             "profile": profile,
+            "player_stats": stats,
         }
 
     # успех: base_cost + вес
@@ -298,6 +366,7 @@ def _gather_tick(uid: int, mode_key: str = DEFAULT_MODE_KEY):
         "mode": mode.key,
         "mode_title": mode.title,
         "profile": profile,
+        "player_stats": stats,
     }
 
 # ---------- endpoints ----------
@@ -319,7 +388,8 @@ def gather_start():
     mode = normalize_mode(data.get("mode"))
     ws = get_world_state(uid)
     totals = inventory_totals(uid)
-    profile = _gather_profile(mode, _resolve_biome(ws.get("tile")), ws.get("weather") or {}, totals)
+    stats = _player_stats(uid)
+    profile = _gather_profile(mode, _resolve_biome(ws.get("tile")), ws.get("weather") or {}, totals, stats)
 
     return jsonify({
         "ok": True,
@@ -330,6 +400,7 @@ def gather_start():
         "modes": serialize_modes(),
         "profile": profile,
         "load": totals,
+        "player_stats": stats,
     })
 
 @bp.post("/gather/stop")
