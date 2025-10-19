@@ -87,5 +87,55 @@ class WorldOverride(db.Model):
     __table_args__ = (UniqueConstraint('x','y', name='uq_world_overrides_xy'),)
 
 
+class WorldMonster(db.Model):
+    __tablename__ = "world_monsters"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.String(64), nullable=False, index=True)
+    x = db.Column(db.Integer, nullable=False)
+    y = db.Column(db.Integer, nullable=False)
+    biome = db.Column(db.String(32), nullable=False)
+    kind = db.Column(db.String(32), nullable=False)
+    name = db.Column(db.String(120), nullable=False)
+    template_key = db.Column(db.String(48), nullable=False, default="generic")
+    level = db.Column(db.Integer, nullable=False)
+    is_boss = db.Column(db.Boolean, nullable=False, default=False)
+    hp = db.Column(db.Integer, nullable=False)
+    hp_max = db.Column(db.Integer, nullable=False)
+    attack = db.Column(db.Integer, nullable=False)
+    defense = db.Column(db.Integer, nullable=False)
+    agility = db.Column(db.Integer, nullable=False)
+    xp_reward = db.Column(db.Integer, nullable=False)
+    gold_reward = db.Column(db.Integer, nullable=False, default=0)
+    state = db.Column(db.String(16), nullable=False, default="idle")
+    data_json = db.Column(db.Text, nullable=False, default="{}")
+    spawned_at = db.Column(db.Float, nullable=False)
+    updated_at = db.Column(db.Float, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'x', 'y', name='uq_world_monster_user_xy'),
+    )
+
+
+class WorldCombat(db.Model):
+    __tablename__ = "world_combat"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    monster_id = db.Column(db.Integer, db.ForeignKey("world_monsters.id"), nullable=False)
+    monster = db.relationship("WorldMonster", lazy="joined")
+    player_hp = db.Column(db.Integer, nullable=False)
+    player_hp_max = db.Column(db.Integer, nullable=False)
+    turn = db.Column(db.Integer, nullable=False, default=1)
+    log_json = db.Column(db.Text, nullable=False, default="[]")
+    state = db.Column(db.String(16), nullable=False, default="active")
+    started_at = db.Column(db.Float, nullable=False)
+    updated_at = db.Column(db.Float, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('user_id', name='uq_world_combat_user'),
+    )
+
+
 def ensure_world_models():
     db.create_all()

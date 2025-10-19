@@ -18,6 +18,7 @@ from world_tuning import (
     prefetch_cooldown_seconds,
 )
 from accounts.models import inventory_totals
+from world_combat import sync_combat_and_monsters
 
 
 # ==================== ВСПОМОГАТЕЛЬНОЕ ====================
@@ -841,6 +842,8 @@ def get_world_state(user_or_id) -> Dict[str,Any]:
         }
         move_progress = p0
 
+    player_info, monsters, combat = sync_combat_and_monsters(uid, row.pos_x, row.pos_y, pt, load_totals)
+
     return {
         "ok": True,
         "pos": {"x":row.pos_x,"y":row.pos_y},
@@ -865,6 +868,9 @@ def get_world_state(user_or_id) -> Dict[str,Any]:
             "speed_effective": speed_effective,
         },
         "inventory": load_totals,
+        "player": player_info,
+        "monsters": monsters,
+        "combat": combat,
         "now": now
     }
 

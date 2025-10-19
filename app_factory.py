@@ -12,6 +12,7 @@ from perf_logger import log, set_log_paths
 
 # ЯВНЫЕ блюпринты (регистрируем здесь ровно один раз)
 from routes_world_resources import bp as world_resources_bp     # url_prefix="/world"
+from routes_world_combat import bp as world_combat_bp           # url_prefix="/world"
 from routes_inventory import bp as inv_bp                      # url_prefix="/inv/api"
 from routes_craft import bp as craft_bp                        # url_prefix="/craft/api"
 
@@ -190,6 +191,11 @@ def create_app() -> Flask:
         app.register_blueprint(world_resources_bp)
     else:
         app.logger.info("Blueprint 'world_resources' already registered, skipping")
+
+    if world_combat_bp and world_combat_bp.name not in app.blueprints:
+        app.register_blueprint(world_combat_bp)
+    else:
+        app.logger.info("Blueprint 'world_combat' already registered, skipping")
 
     if inv_bp and inv_bp.name not in app.blueprints:
         app.register_blueprint(inv_bp)

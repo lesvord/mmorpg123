@@ -46,6 +46,42 @@
   .aim{ fill:none; stroke:#ffcd4d; stroke-width:1.2; stroke-dasharray: 4 3 }
   .hover{ fill: rgba(255,255,255,.06); stroke: rgba(255,255,255,.25); stroke-width: 1 }
 
+  .card.encounters{ padding:12px; }
+  .enc-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+  .enc-head .subtitle{ font-size:12px; opacity:.85; }
+  .enc-list{ display:flex; flex-direction:column; gap:8px; }
+  .monster-row{ display:flex; align-items:center; justify-content:space-between; gap:12px;
+                padding:10px 12px; border-radius:12px; background:rgba(255,255,255,.06);
+                border:1px solid rgba(255,255,255,.12); }
+  .monster-row.boss{ border-color:rgba(249,115,22,.45); box-shadow:0 0 0 1px rgba(249,115,22,.25) inset; }
+  .monster-row .meta{ display:flex; flex-direction:column; gap:4px; }
+  .monster-row .title{ font-weight:800; font-size:15px; display:flex; align-items:center; gap:6px; }
+  .monster-row .tags{ font-size:12px; opacity:.85; display:flex; gap:6px; flex-wrap:wrap; }
+  .monster-row .actions{ display:flex; gap:8px; }
+  .monster-row .actions .btn{ min-height:0; padding:10px 14px; font-size:13px; }
+  .monster-row .pill{ font-size:11px; }
+
+  .card.combat{ padding:12px; }
+  .card.combat.hidden{ display:none; }
+  .combat-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+  .combat-header .pill{ font-size:12px; }
+  .combat-bars{ display:flex; flex-direction:column; gap:8px; margin-bottom:12px; }
+  .combat-bar{ display:flex; align-items:center; gap:10px; }
+  .combat-bar .label{ font-weight:800; min-width:74px; }
+  .hp-bar{ flex:1; height:12px; border-radius:999px; background:rgba(255,255,255,.08); overflow:hidden; }
+  .hp-bar .fill{ height:100%; width:100%; background:#22c55e; }
+  .hp-bar.monster .fill{ background:#f87171; }
+  .combat-bar .hp-num{ font-variant-numeric:tabular-nums; font-size:12px; }
+  .combat-actions{ display:flex; gap:10px; margin-bottom:10px; }
+  .btn.combat{ flex:1; font-size:15px; }
+  .btn.combat.attack{ background:#ef4444; }
+  .btn.combat.flee{ background:#6b7280; }
+  .combat-log{ max-height:200px; overflow:auto; display:flex; flex-direction:column; gap:6px; font-size:13px; }
+  .combat-log .entry{ padding:6px 8px; border-radius:10px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08); }
+  .combat-log .entry.player{ border-color:rgba(96,165,250,.35); }
+  .combat-log .entry.monster{ border-color:rgba(248,113,113,.35); }
+  .combat-log .entry.system{ opacity:.85; }
+
   /* Нижняя панель действий */
   .controls{
     position: fixed; left:0; right:0;
@@ -182,6 +218,43 @@
 
 <div style="height:140px" aria-hidden="true"></div>
 
+<!-- ======= Монстры и бой ======= -->
+<section class="card encounters" id="encounterCard" aria-label="Монстры поблизости">
+  <div class="enc-head">
+    <b>Монстры поблизости</b>
+    <span class="subtitle" id="encSummary">Спокойно</span>
+  </div>
+  <div class="enc-list" id="encounterList">
+    <div class="tiny">Поблизости никого нет.</div>
+  </div>
+</section>
+
+<section class="card combat hidden" id="combatCard" aria-label="Текущий бой">
+  <div class="combat-header">
+    <b id="combatTitle">Бой</b>
+    <span class="pill" id="combatStatus">—</span>
+  </div>
+  <div class="combat-bars">
+    <div class="combat-bar">
+      <span class="label">Вы</span>
+      <div class="hp-bar" id="combatPlayerBar"><div class="fill" id="combatPlayerHP"></div></div>
+      <span class="hp-num" id="combatPlayerNum">0 / 0</span>
+    </div>
+    <div class="combat-bar">
+      <span class="label" id="combatMonsterLabel">Противник</span>
+      <div class="hp-bar monster" id="combatMonsterBar"><div class="fill" id="combatMonsterHP"></div></div>
+      <span class="hp-num" id="combatMonsterNum">0 / 0</span>
+    </div>
+  </div>
+  <div class="combat-actions">
+    <button class="btn combat attack" id="combatAttackBtn" type="button">⚔️ Атаковать</button>
+    <button class="btn combat flee" id="combatFleeBtn" type="button">🏃‍♂️ Отступить</button>
+  </div>
+  <div class="combat-log" id="combatLog">
+    <div class="entry system">Здесь появится журнал боя.</div>
+  </div>
+</section>
+
 <!-- ======= нижняя панель действий ======= -->
 <section class="controls" id="controlsBar" aria-label="Действия">
   <div class="wrap">
@@ -257,7 +330,12 @@
       /* добыча — правильные endpoints у блюпринта world_resources */
       gatherStart: "{{ url_for('world_resources.gather_start') }}",
       gatherStop:  "{{ url_for('world_resources.gather_stop') }}",
-      gatherTick:  "{{ url_for('world_resources.gather_tick') }}"
+      gatherTick:  "{{ url_for('world_resources.gather_tick') }}",
+
+      combatState: "{{ url_for('world_combat.combat_state') }}",
+      combatEngage: "{{ url_for('world_combat.combat_engage') }}",
+      combatAttack: "{{ url_for('world_combat.combat_attack') }}",
+      combatFlee: "{{ url_for('world_combat.combat_flee') }}"
     },
     gatherModes: {{ gather_modes|tojson|safe }},
     gatherDefaultMode: "{{ gather_default_mode }}"
@@ -265,6 +343,7 @@
 </script>
 
 <script defer src="{{ url_for('static', filename='js/world_client.js') }}?v={{ static_v }}"></script>
+<script defer src="{{ url_for('static', filename='js/combat_client.js') }}?v={{ static_v }}"></script>
 <script defer src="{{ url_for('static', filename='js/world_ui.js') }}?v={{ static_v }}"></script>
 <!-- новый фронтенд-модуль добычи -->
 <script defer src="{{ url_for('static', filename='js/gather_client.js') }}?v={{ static_v }}"></script>

@@ -81,6 +81,7 @@ class PlayerProfile(db.Model):
     agi:  Mapped[int] = mapped_column(db.Integer, default=5, nullable=False)
     int_: Mapped[int] = mapped_column("int", db.Integer, default=5, nullable=False)
     vit:  Mapped[int] = mapped_column(db.Integer, default=5, nullable=False)
+    defense: Mapped[int] = mapped_column(db.Integer, default=5, nullable=False)
     luck: Mapped[int] = mapped_column(db.Integer, default=1, nullable=False)
 
     stamina_max: Mapped[int] = mapped_column(db.Integer, default=100, nullable=False)
@@ -110,6 +111,9 @@ class PlayerProfile(db.Model):
             self.level += 1
             # Пассивный рост статов/выносливости
             self.vit += 1
+            self.str_ += 1
+            self.agi += 1
+            self.defense += 1
             self.stamina_max += 5
         return before, self.level
 
@@ -125,10 +129,53 @@ class PlayerProfile(db.Model):
             "agi": self.agi,
             "int": self.int_,
             "vit": self.vit,
+            "defense": self.defense,
             "luck": self.luck,
             "stamina_max": self.stamina_max,
             "gold": self.gold,
             "carry_capacity_kg": float(self.carry_capacity_kg or 30.0),
+        }
+
+    # Базовые боевые характеристики с учётом текущих статов
+    def combat_snapshot(self, load_totals: Optional[Dict[str, float]] = None) -> Dict[str, float]:
+        load_frac = 0.0
+        if load_totals:
+            try:
+                load_frac = max(0.0, float(load_totals.get("load_frac", 0.0)))
+            except Exception:
+                load_frac = 0.0
+
+        encumber_pen = min(0.4, load_frac * 0.45)
+        level = max(1, int(self.level or 1))
+        str_base = max(1, int(self.str_ or 1))
+        agi_base = max(1, int(self.agi or 1))
+        def_base = max(1, int(self.defense or self.vit or 1))
+        vit_base = max(1, int(self.vit or 1))
+        luck = max(0, int(self.luck or 0))
+
+        hp_max = int(60 + vit_base * 12 + str_base * 1.8 + level * 8)
+        attack = float(str_base * (1.8 + level * 0.08))
+        defense = float(def_base * (1.3 + level * 0.05))
+        agility = float(agi_base * (1.1 + level * 0.04)) * (1.0 - encumber_pen * 0.5)
+
+        crit = 0.05 + agi_base * 0.003 + luck * 0.004
+        dodge = (0.04 + agi_base * 0.0035) * (1.0 - encumber_pen)
+        speed = 1.0 + agi_base * 0.015 - encumber_pen * 0.35
+
+        crit = max(0.03, min(0.45, crit))
+        dodge = max(0.01, min(0.35, dodge))
+        speed = max(0.5, min(2.2, speed))
+
+        return {
+            "level": level,
+            "hp_max": hp_max,
+            "attack": round(attack, 1),
+            "defense": round(defense, 1),
+            "agility": round(agility, 1),
+            "crit": round(crit, 3),
+            "dodge": round(dodge, 3),
+            "speed": round(speed, 3),
+            "encumber_pen": round(encumber_pen, 3),
         }
 
     def __repr__(self) -> str:
@@ -468,6 +515,10 @@ def ensure_accounts_models():
         # --- acc_profiles: грузоподъёмность ---
         if not has_col("acc_profiles", "carry_capacity_kg"):
             conn.exec_driver_sql('ALTER TABLE acc_profiles ADD COLUMN carry_capacity_kg REAL DEFAULT 30')
+
+        # --- acc_profiles: защита ---
+        if not has_col("acc_profiles", "defense"):
+            conn.exec_driver_sql('ALTER TABLE acc_profiles ADD COLUMN defense INTEGER DEFAULT 5')
 
         # --- acc_item_defs: вес и стек ---
         if not has_col("acc_item_defs", "weight_kg"):

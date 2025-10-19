@@ -17,6 +17,10 @@
     gatherTick:'/world/gather/tick',
     invGet:'/world/inventory',
     invDrop:'/world/inventory/drop',
+    combatState:'/world/combat/state',
+    combatEngage:'/world/combat/engage',
+    combatAttack:'/world/combat/attack',
+    combatFlee:'/world/combat/flee',
   }, BOOT.endpoints || {});
 
   const VERS = Object.assign({}, BOOT.tileVersions || {}); let VERS_GEN = 0;
@@ -675,6 +679,10 @@ function setStats(s){
   }
 
   function scheduleTickSoon(ms=120){ clearTimeout(S.tickTimer); S.tickTimer=setTimeout(loop,ms) }
+
+  window.addEventListener('world:refresh', () => {
+    scheduleTickSoon(40);
+  });
 
   async function commitDest(t){
     if (S.campHere) { pkToast('Нельзя двигаться, пока развернут лагерь. Нажмите «Лагерь», чтобы свернуть.'); return; }

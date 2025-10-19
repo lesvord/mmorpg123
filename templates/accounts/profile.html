@@ -35,6 +35,7 @@
   </section>
 
   <section class="grid">
+    {% set combat = profile.combat_snapshot() %}
     <div class="card">
       <b>Статы</b>
       <div class="kv"><span>Уровень</span><b>{{ profile.level }}</b></div>
@@ -44,8 +45,15 @@
       <div class="kv"><span>Ловкость</span><b>{{ profile.agi }}</b></div>
       <div class="kv"><span>Интеллект</span><b>{{ profile.int_ }}</b></div>
       <div class="kv"><span>Выносливость</span><b>{{ profile.vit }}</b></div>
+      <div class="kv"><span>Защита</span><b>{{ profile.defense }}</b></div>
       <div class="kv"><span>Удача</span><b>{{ profile.luck }}</b></div>
       <div class="kv"><span>Золото</span><b>{{ profile.gold|int }}</b></div>
+      <hr style="border:0;border-top:1px solid rgba(255,255,255,.08);margin:8px 0">
+      <div class="kv"><span>Макс. здоровье</span><b>{{ combat.hp_max }}</b></div>
+      <div class="kv"><span>Атака</span><b>{{ combat.attack }}</b></div>
+      <div class="kv"><span>Защита (боев.)</span><b>{{ combat.defense }}</b></div>
+      <div class="kv"><span>Крит. шанс</span><b>{{ (combat.crit * 100)|round(1) }}%</b></div>
+      <div class="kv"><span>Уклонение</span><b>{{ (combat.dodge * 100)|round(1) }}%</b></div>
     </div>
 
     <div class="card">
