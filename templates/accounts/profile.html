@@ -87,15 +87,15 @@
 
   // ====== Инвентарь: загрузка/рендер/выброс ======
   async function invGET(){
-    const r = await fetch('/world/inventory', {headers:{'Cache-Control':'no-cache'}});
+    const r = await fetch('/inv/api/list', {headers:{'Cache-Control':'no-cache'}});
     const j = await r.json().catch(()=>({ok:false}));
     return j;
   }
-  async function invDROP(key, qty){
-    const r = await fetch('/world/inventory/drop', {
+  async function invDROP(invId, qty){
+    const r = await fetch('/inv/api/drop', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({key, qty})
+      body: JSON.stringify({inv_id: invId, qty})
     });
     const j = await r.json().catch(()=>({ok:false}));
     return j;
@@ -108,29 +108,40 @@
 
     if (!j || !j.ok){ list.innerHTML = '<div class="tiny">Не удалось загрузить инвентарь</div>'; return; }
 
-    wEl.textContent = (j.weight||0).toFixed(2);
-    cEl.textContent = (j.cap||30).toFixed(0);
-    const perc = Math.max(0, Math.min(100, (j.weight||0)/(j.cap||1)*100));
+    const totals = j.totals || {};
+    const counts = j.counts || {};
+    const items = Array.isArray(j.items) ? j.items : [];
+
+    wEl.textContent = fixed(totals.weight_kg || 0);
+    cEl.textContent = fixed(totals.capacity_kg || 0);
+    const perc = Math.max(0, Math.min(100, Number(totals.load_pct || 0)));
     fill.style.width = perc.toFixed(0) + '%';
 
-    if (!j.items || !j.items.length){
+    if (!items.length){
       list.innerHTML = '<div class="tiny">Пусто</div>';
       return;
     }
 
     list.innerHTML = '';
-    j.items.forEach(it=>{
+    items.forEach(it=>{
       const row = document.createElement('div');
       row.className = 'row';
       const left = document.createElement('div');
       left.className = 'meta';
       const nm = document.createElement('div');
       nm.className = 'name';
-      nm.textContent = it.name || it.key;
+      const nameTxt = it.name || it.item_key;
+      nm.textContent = `${nameTxt} ×${it.qty || 1}`;
+      const icon = document.createElement('span');
+      icon.className = 'ico';
+      icon.textContent = emojiFor(it.item_key || it.name || '');
+      icon.style.marginRight = '6px';
+      icon.style.display = 'inline-block';
+      nm.prepend(icon);
       const sub = document.createElement('div');
       sub.className = 'sub';
-      const w = (it.weight || 0)* (it.qty || 1);
-      sub.textContent = `x${it.qty || 1} · ${w.toFixed(2)} кг`;
+      const totalWeight = (it.total_weight != null) ? it.total_weight : (it.weight_kg || 0) * (it.qty || 1);
+      sub.textContent = `${fixed(it.weight_kg || 0)} кг/шт · всего ${fixed(totalWeight)} кг`;
       left.appendChild(nm); left.appendChild(sub);
 
       const btn = document.createElement('button');
@@ -141,7 +152,7 @@
         const val = prompt(`Сколько выбросить? (1..${maxQ})`, String(Math.min(1, maxQ)));
         if (!val) return;
         const q = Math.max(1, Math.min(maxQ, parseInt(val,10)||1));
-        const res = await invDROP(it.key, q);
+        const res = await invDROP(it.inv_id, q);
         if (!res || !res.ok){ alert(res && res.message ? res.message : 'Ошибка'); return; }
         loadInv();
       });
@@ -150,6 +161,23 @@
       list.appendChild(row);
     });
   }
+  function emojiFor(key){
+    const k = String(key||'').toLowerCase();
+    if (k.includes('wood') || k.includes('stick')) return '🪵 ';
+    if (k.includes('ore') || k.includes('stone') || k.includes('gem')) return '🪨 ';
+    if (k.includes('fish')) return '🐟 ';
+    if (k.includes('berry')) return '🫐 ';
+    if (k.includes('mush')) return '🍄 ';
+    if (k.includes('herb') || k.includes('fiber')) return '🌿 ';
+    if (k.includes('ice')) return '🧊 ';
+    if (k.includes('cactus')) return '🌵 ';
+    return '';
+  }
+
+  function fixed(val){
+    return (Math.round(Number(val||0)*100)/100).toFixed(2).replace(/\.00$/,'');
+  }
+
   async function loadInv(){ const j = await invGET(); renderInv(j); }
   document.addEventListener('DOMContentLoaded', loadInv);
 </script>
