@@ -99,7 +99,13 @@ def _player_stats(uid: int) -> Dict[str, float]:
         return {}
 
 
-def _gather_profile(mode, biome: str, weather: dict, load_totals: dict, player_stats: Optional[Dict[str, float]] = None) -> dict:
+def _gather_profile(
+    mode,
+    biome: str,
+    weather: dict,
+    load_totals: dict,
+    player_stats: Optional[Dict[str, float]] = None,
+) -> dict:
     load_frac = _load_fraction(load_totals)
     weather_diff = _weather_difficulty(weather)
 
