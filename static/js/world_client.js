@@ -128,7 +128,8 @@
                 lava:'🔥 опасно', road:'🛣️ быстрее', town:'🏠 отдых', tavern:'🏠 отдых', camp:'🏕️ отдых'};
     const wMap={clear:'☀️ хорошая погода', rain:'🌧️ усталость↑', fog:'🌫️ видимость↓', wind:'💨 порывы',
                 storm:'⛈️ скорость↓', snow:'❄️ скорость↓', heat:'🥵 усталость↑'};
-    const list=[]; if(tMap[baseKey]) list.push(tMap[baseKey]); if(wMap[weatherKey]) list.push(wMap[weatherKey]); if(notes && String(notes).trim()) list.push('🛈 '+notes);
+    const noteText = notes || '';
+    const list=[]; if(tMap[baseKey]) list.push(tMap[baseKey]); if(wMap[weatherKey]) list.push(wMap[weatherKey]); if(noteText && String(noteText).trim()) list.push('🛈 '+noteText);
     return 'Эффекты: ' + (list.length?list.join(' · '):'—');
   }
 
@@ -138,7 +139,9 @@
     const iconEl  = $('wxIcon');
     const key = (s && s.weather) ? (s.weather.key || s.weather.name || 'clear') : 'clear';
     const text = prettyWeatherName(s && s.weather);
-    if (wInline) wInline.textContent = text || '—';
+    const temp = s && s.weather && s.weather.metrics && s.weather.metrics.temperature_c;
+    const summary = temp != null ? `${text || '—'} · ${Number(temp).toFixed(1)}°C` : (text || '—');
+    if (wInline) wInline.textContent = summary;
     if (iconEl)  iconEl.textContent  = wxIconFor(String(key).toLowerCase());
   }
 
@@ -265,45 +268,54 @@
     if (campPill) campPill.textContent = S.campHere ? (S.campMine ? 'мой' : 'чужой') : '—';
   }
 
-  /* ——— трей погоды (опционален) ——— */
+  /* ——— расширенный блок погоды и HUD тумблеры ——— */
   function updateWeatherTray(s){
-    const tNow = $('wxNow'), tMods = $('wxMods'), tUrban = $('wxUrban'), tExplain = $('wxExplain');
+    const metrics = (s && s.weather && s.weather.metrics) || {};
+    const mods = s && s.weather && (s.weather.mods || s.weather.effects || {});
     const wxKey = (s && s.weather) ? (s.weather.key || s.weather.name || 'clear') : 'clear';
-    const nowStr = prettyWeatherName(s && s.weather);
 
-    let modsStr = '—';
-    const mods = s && s.weather && (s.weather.mods || s.weather.modifiers || s.weather.effects);
-    if (Array.isArray(mods) && mods.length) modsStr = mods.map(pickText).join(' · ');
-    else if (typeof mods === 'string') modsStr = mods;
-    else if (s && s.weather && s.weather.note) modsStr = pickText(s.weather.note);
+    const temp = metrics.temperature_c;
+    const feels = metrics.feels_like_c;
+    const humidity = metrics.humidity_pct;
+    const wind = metrics.wind_mps;
+    const visibility = metrics.visibility_km;
+    const comfort = metrics.comfort || '';
 
-    let urbanStr = '—';
-    if (s && (s.tile==='town' || s.tile==='tavern')) urbanStr = 'городская зона';
+    const map = {
+      wxTemp: (temp != null) ? `${Number(temp).toFixed(1)}°C` : '—',
+      wxFeels: (feels != null) ? `${Number(feels).toFixed(1)}°C` : '—',
+      wxHumidity: (humidity != null) ? `${Math.round(humidity)}%` : '—',
+      wxWind: (wind != null) ? `${Number(wind).toFixed(1)} м/с` : '—',
+      wxVisibility: (visibility != null) ? `${Number(visibility).toFixed(1)} км` : '—',
+    };
 
-    let climateRaw = (s && s.climate != null) ? s.climate : null;
-    if (climateRaw == null && s && s.weather) climateRaw = s.weather.climate || s.weather.climate_key || s.weather.climateName || null;
-    if (climateRaw == null) climateRaw = climateFromTile(s && s.tile);
+    for (const [id, val] of Object.entries(map)){
+      const el = $(id);
+      if (el) el.textContent = val;
+    }
 
-    if (tNow) tNow.textContent = nowStr;
-    if (tMods) tMods.textContent = modsStr;
-    if (tUrban) tUrban.textContent = urbanStr;
+    const comfortEl = $('wxComfort');
+    if (comfortEl) comfortEl.textContent = comfort ? `Комфорт: ${comfort}` : 'Комфорт: —';
 
-    const explain = `Климат: ${prettyClimateName(climateRaw)} · ${
-      computeEffects(s && s.tile, wxKey, s && s.weather && s.weather.note).replace(/^Эффекты:\s*/, '')
-    }`;
-    if (tExplain) tExplain.textContent = explain;
+    const modEl = $('wxModifiers');
+    if (modEl && mods){
+      const f = mods.fatigue_per_tile != null ? `усталость/клетка: ${mods.fatigue_per_tile.toFixed(2)}` : null;
+      const speed = mods.speed_effective != null ? `скорость: ${mods.speed_effective.toFixed(2)} кл/с` : null;
+      const parts = [f, speed].filter(Boolean);
+      modEl.textContent = parts.length ? parts.join(' · ') : '—';
+    }
+
+    const explainEl = $('wxExplain');
+    if (explainEl){
+      let climateRaw = (s && s.climate != null) ? s.climate : null;
+      if (climateRaw == null && s && s.weather) climateRaw = s.weather.climate || s.weather.climate_key || s.weather.climateName || null;
+      if (climateRaw == null) climateRaw = climateFromTile(s && s.tile);
+      const effects = computeEffects(s && s.tile, wxKey, s && s.weather && (s.weather.notes || s.weather.note)).replace(/^Эффекты:\s*/, '');
+      explainEl.textContent = `Климат: ${prettyClimateName(climateRaw)} · ${effects}`;
+    }
   }
 
   function bindToggles(){
-    const wxToggle = $('wxToggle');
-    const wxTray = $('wxTray');
-    if (wxToggle && wxTray){
-      wxToggle.addEventListener('click', ()=>{
-        S.wxOpen = !S.wxOpen;
-        wxTray.classList.toggle('open', S.wxOpen);
-        wxTray.setAttribute('aria-hidden', S.wxOpen ? 'false' : 'true');
-      });
-    }
     const hudToggle = $('hudToggle');
     const hudRoot = $('hudRoot');
     if (hudToggle && hudRoot){
@@ -313,6 +325,25 @@
         hudToggle.textContent = S.hudCollapsed ? 'Показать ↓' : 'Скрыть ↑';
         hudToggle.setAttribute('aria-expanded', S.hudCollapsed ? 'false' : 'true');
       });
+    }
+  }
+
+  function updateLoadUI(s){
+    const inv = s && s.inventory ? s.inventory : {};
+    const weight = Number(inv.weight_kg || 0).toFixed(1);
+    const capacity = Number(inv.capacity_kg || 0).toFixed(1);
+    const pct = Math.round(Number(inv.load_pct || 0));
+    const tier = inv.tier || null;
+    const desc = inv.tier_desc || '';
+
+    const wEl = $('invWeightHud'); if (wEl) wEl.textContent = weight;
+    const cEl = $('invCapacityHud'); if (cEl) cEl.textContent = capacity;
+    const pctEl = $('invLoadPctHud'); if (pctEl) pctEl.textContent = pct + '%';
+
+    const tierEl = $('invLoadTier');
+    if (tierEl){
+      tierEl.textContent = desc || '—';
+      tierEl.dataset.tier = tier || 'none';
     }
   }
 
@@ -339,8 +370,18 @@
   function setGatherUI(active){
     const btn = $('btnGather');
     if (!btn) return;
+    if (btn.dataset.gatherManaged === '1'){
+      btn.classList.toggle('gather-active', !!active);
+      return;
+    }
     btn.textContent = active ? '⛏️ Стоп' : '⛏️ Добывать';
     btn.style.background = active ? '#ef4444' : '#1f6feb';
+  }
+
+  function gatherModeKey(){
+    const gm = window.GatherMode;
+    if (gm && typeof gm.getMode === 'function'){ try{ return gm.getMode(); }catch(_){ return gm.current; } }
+    return (window.WORLD_BOOT && window.WORLD_BOOT.gatherDefaultMode) || 'forage';
   }
 
   async function gatherTick(){
@@ -350,12 +391,16 @@
     const weather = (s.weather && (s.weather.key || s.weather.name)) || 'clear';
     const climate = lastClimateKey(s);
 
-    const j = await apiPOST(ENDPOINTS.gatherTick, { tile, weather, climate });
+    const payload = { tile, weather, climate, mode: gatherModeKey() };
+    const j = await apiPOST(ENDPOINTS.gatherTick, payload);
     if (!j || !j.ok){
       pkToast('Добыча: ошибка');
       S.gatherActive = false;
       setGatherUI(false);
       return;
+    }
+    if (j.mode && window.GatherMode && typeof window.GatherMode.setMode === 'function'){
+      try{ window.GatherMode.setMode(j.mode); }catch(_){ window.GatherMode.current = j.mode; }
     }
     // обновим усталость в HUD, если есть
     if (typeof j.fatigue === 'number'){
@@ -384,8 +429,11 @@
   async function startGather(){
     if (S.campHere){ pkToast('Сверните лагерь для добычи'); return; }
     if (S.anim && S.anim.moving){ pkToast('Остановитесь, чтобы начать добычу'); return; }
-    const r = await apiPOST(ENDPOINTS.gatherStart);
+    const r = await apiPOST(ENDPOINTS.gatherStart, { mode: gatherModeKey() });
     if (!r || !r.ok){ pkToast('Не удалось начать добычу'); return; }
+    if (r.mode && window.GatherMode && typeof window.GatherMode.setMode === 'function'){
+      try{ window.GatherMode.setMode(r.mode); }catch(_){ window.GatherMode.current = r.mode; }
+    }
     S.gatherActive = true;
     setGatherUI(true);
     clearTimeout(S.gatherTimer);
@@ -396,7 +444,7 @@
     S.gatherTimer = null;
     S.gatherActive = false;
     setGatherUI(false);
-    await apiPOST(ENDPOINTS.gatherStop).catch(()=>{});
+    await apiPOST(ENDPOINTS.gatherStop, { mode: gatherModeKey() }).catch(()=>{});
   }
   function toggleGather(){ S.gatherActive ? stopGather() : startGather(); }
 
@@ -502,7 +550,8 @@ function setStats(s){
 
   const wxKey = (s.weather && (s.weather.key || s.weather.name || 'clear')) || 'clear';
   const effEl = $('effects');
-  if (effEl) effEl.textContent = computeEffects(s.tile, wxKey, s.weather && s.weather.note);
+  const weatherNotes = s.weather && (s.weather.notes || s.weather.note || '');
+  if (effEl) effEl.textContent = computeEffects(s.tile, wxKey, weatherNotes);
 
   let climateRaw = (s && s.climate != null) ? s.climate : null;
   if (climateRaw == null && s && s.weather)
@@ -523,6 +572,7 @@ function setStats(s){
 
   updateWeatherTray(s);
   updateWeatherBanner(s);
+  updateLoadUI(s);
   publishWorldState(s);
 
   // -------- анти-«резинка»: мягкая синхронизация позиции --------

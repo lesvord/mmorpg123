@@ -22,6 +22,18 @@
          background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.10) }
   .stat b{ font-variant-numeric: tabular-nums }
 
+  .pill.wide{ min-width:0; flex:1 1 180px; white-space:normal; }
+  .wx-detail{ margin-top:8px; }
+  .wx-detail .pill{ font-size:11px; }
+  .load-row{ margin-top:6px; }
+  .pill.load-tier[data-tier="light"]{ background:rgba(34,197,94,.14); border-color:rgba(34,197,94,.35); }
+  .pill.load-tier[data-tier="steady"]{ background:rgba(59,130,246,.14); border-color:rgba(59,130,246,.35); }
+  .pill.load-tier[data-tier="strained"]{ background:rgba(249,115,22,.14); border-color:rgba(249,115,22,.35); }
+  .pill.load-tier[data-tier="overloaded"]{ background:rgba(248,113,113,.16); border-color:rgba(248,113,113,.35); }
+  .pill.load-tier[data-tier="encumbered"]{ background:rgba(239,68,68,.25); border-color:rgba(239,68,68,.55); }
+
+  .btn.mine.gather-active{ background:#ef4444; }
+
   .bar{ height:12px; border-radius:999px; background:rgba(255,255,255,.08); overflow:hidden }
   .bar .fill{ height:100%; background:#4ca6ff }
 
@@ -129,6 +141,26 @@
       <div class="bar"><div class="fill" id="fatFill" style="width:0%"></div></div>
     </div>
   </div>
+
+  <div class="row wrap wx-detail" id="wxMetricsRow">
+    <span class="pill">Температура: <b id="wxTemp">—</b></span>
+    <span class="pill">Ощущается: <b id="wxFeels">—</b></span>
+    <span class="pill">Влажность: <b id="wxHumidity">—</b></span>
+    <span class="pill">Ветер: <b id="wxWind">—</b></span>
+    <span class="pill">Видимость: <b id="wxVisibility">—</b></span>
+    <span class="pill" id="wxComfort">Комфорт: —</span>
+  </div>
+
+  <div class="row wrap wx-detail">
+    <span class="pill wide" id="wxModifiers">—</span>
+    <span class="pill wide" id="wxExplain">—</span>
+  </div>
+
+  <div class="row wrap load-row" id="loadRow">
+    <span class="pill">Вес: <b id="invWeightHud">0</b>/<b id="invCapacityHud">0</b> кг</span>
+    <span class="pill">Нагрузка: <b id="invLoadPctHud">0%</b></span>
+    <span class="pill load-tier" id="invLoadTier">—</span>
+  </div>
 </section>
 
 <!-- ======= MAP ======= -->
@@ -159,6 +191,7 @@
     <button class="btn camp" id="btnCamp" type="button">🏕️ Лагерь</button>
   </div>
 </section>
+<div class="gather-mode-bar" id="gatherModeBar" role="group" aria-label="Режим добычи"></div>
 
 <!-- ======= нижняя навигация ======= -->
 <nav class="tabbar" id="tabbar" role="tablist" aria-label="Навигация">
@@ -225,7 +258,9 @@
       gatherStart: "{{ url_for('world_resources.gather_start') }}",
       gatherStop:  "{{ url_for('world_resources.gather_stop') }}",
       gatherTick:  "{{ url_for('world_resources.gather_tick') }}"
-    }
+    },
+    gatherModes: {{ gather_modes|tojson|safe }},
+    gatherDefaultMode: "{{ gather_default_mode }}"
   };
 </script>
 

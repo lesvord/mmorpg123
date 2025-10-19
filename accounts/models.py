@@ -289,11 +289,53 @@ def carry_capacity_kg(user_id: int) -> float:
     return round(cap, 3)
 
 
+def _load_profile(frac: float) -> Tuple[str, str]:
+    """
+    Возвращает (tier, description) для UI/геймплея исходя из доли загрузки.
+    """
+    if frac <= 0.45:
+        return "light", "Нагрузка почти не ощущается"
+    if frac <= 0.75:
+        return "steady", "Чувствуется тяжесть, но темп держится"
+    if frac <= 1.05:
+        return "strained", "Переутомление накапливается, скорость падает"
+    if frac <= 1.25:
+        return "overloaded", "Вы почти перегружены, движение даётся с трудом"
+    return "encumbered", "Перегруз: придётся замедлиться или разгрузиться"
+
+
 def inventory_totals(user_id: int) -> Dict[str, float]:
     w = inventory_weight_kg(user_id)
     cap = carry_capacity_kg(user_id)
-    pct = 0.0 if cap <= 0 else min(100.0, round(w / cap * 100.0, 2))
-    return {"weight_kg": w, "capacity_kg": cap, "load_pct": pct}
+    if cap <= 0:
+        load_frac = 0.0
+    else:
+        load_frac = max(0.0, w / cap)
+
+    pct = min(160.0, round(load_frac * 100.0, 2))
+
+    # Немного «реализма»: после половины вместимости появляются штрафы к скорости,
+    # а после перегруза растёт и усталость от любых действий.
+    load_clamped = min(1.6, load_frac)
+    speed_mul = 1.0 - 0.38 * (load_clamped ** 1.35)
+    speed_mul = max(0.28, round(speed_mul, 3))
+
+    fatigue_mul = 1.0 + 0.65 * (load_clamped ** 1.45)
+    fatigue_mul = round(fatigue_mul, 3)
+
+    tier, desc = _load_profile(load_frac)
+
+    return {
+        "weight_kg": round(w, 3),
+        "capacity_kg": round(cap, 3),
+        "load_pct": pct,
+        "load_frac": round(load_frac, 3),
+        "speed_mul": speed_mul,
+        "fatigue_mul": fatigue_mul,
+        "tier": tier,
+        "tier_desc": desc,
+        "over_encumbered": load_frac > 1.0,
+    }
 
 
 def list_inventory(user_id: int) -> List[InventoryItem]:

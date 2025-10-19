@@ -11,6 +11,36 @@
     gatherTick:  '/world/gather/tick',
   }, BOOT.endpoints || {});
 
+  const MODE_DEFAULTS = [
+    { key:'forage', title:'Сбор', icon:'🌿', description:'Сбор трав и ягод.' },
+    { key:'wood',   title:'Деревья', icon:'🌲', description:'Рубка деревьев и получение древесины.' },
+    { key:'ore',    title:'Камни', icon:'🪨', description:'Добыча камня и руды.' },
+  ];
+
+  let MODES = Array.isArray(BOOT.gatherModes) && BOOT.gatherModes.length
+    ? BOOT.gatherModes.slice()
+    : MODE_DEFAULTS.slice();
+
+  function findMode(key){
+    if (!key) return null;
+    const norm = String(key).toLowerCase();
+    return MODES.find(m => String(m.key).toLowerCase() === norm) || null;
+  }
+
+  let currentMode = (() => {
+    let initial = null;
+    try{ const saved = localStorage.getItem('gather_mode'); if (saved) initial = saved; }catch(_){ }
+    if (!initial) initial = BOOT.gatherDefaultMode || null;
+    const found = findMode(initial) || MODES[0] || null;
+    return found ? found.key : 'forage';
+  })();
+
+  function modeLabel(modeKey){
+    const m = findMode(modeKey);
+    if (!m) return '⛏️ Добывать';
+    return `${m.icon || '⛏️'} ${m.title}`;
+  }
+
   // -------- fetch helpers --------
   async function jPOST(url, data) {
     try{
@@ -114,13 +144,28 @@
   }
 
   function toastFromTick(resp){
+    if (resp && resp.profile) lastProfile = resp.profile;
+    if (resp && resp.profile && typeof resp.profile.tick_ms === 'number'){
+      TICK_MS = Math.max(2000, Number(resp.profile.tick_ms));
+    }
+
     // успех
     if (resp && Array.isArray(resp.items) && resp.items.length){
       const it = resp.items[0];
       const kg = (typeof it.weight_kg !== 'undefined') ? fmtKg(it.weight_kg) : '—';
+      const qty = Number(it.qty || 1);
       const title = `${iconFor(it.key, it.icon)} ${it.name}`;
-      const meta  = `Вес: ${kg} кг · +1 шт`;
-      showToast({ title, meta, icon: iconFor(it.key, it.icon), variant:'success', ttl: 2600 });
+      const metaParts = [];
+      metaParts.push(`Вес: ${kg} кг/шт`);
+      metaParts.push(`Количество: +${qty}`);
+      if (resp.fatigue_extra){
+        metaParts.push(`Усталость +${Number(resp.fatigue_extra).toFixed(2)}`);
+      }
+      if (resp.totals && typeof resp.totals.load_pct !== 'undefined'){
+        const pct = Math.round(Number(resp.totals.load_pct) || 0);
+        metaParts.push(`Нагрузка ${pct}%`);
+      }
+      showToast({ title, meta: metaParts.join(' · '), icon: iconFor(it.key, it.icon), variant:'success', ttl: 2600 });
       return;
     }
     // перегруз / предупреждение
@@ -132,17 +177,72 @@
     showToast({ title: 'Пусто', meta: resp && resp.message || 'Ничего не найдено', icon:'🪨', variant:'miss', ttl: 1600 });
   }
 
+  function updateModeButtons(){
+    const bar = $('gatherModeBar');
+    if (!bar) return;
+    bar.querySelectorAll('.mode-btn').forEach(btn => {
+      const active = String(btn.dataset.mode || '').toLowerCase() === String(currentMode).toLowerCase();
+      btn.classList.toggle('active', active);
+      if (active) btn.setAttribute('aria-pressed', 'true');
+      else btn.setAttribute('aria-pressed', 'false');
+    });
+  }
+
+  function renderModeButtons(){
+    const bar = $('gatherModeBar');
+    if (!bar) return;
+    bar.innerHTML = '';
+    if (!MODES.length) return;
+    MODES.forEach(mode => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'mode-btn' + (mode.key === currentMode ? ' active' : '');
+      btn.dataset.mode = mode.key;
+      btn.innerHTML = `<span class="ico">${mode.icon || '⛏️'}</span><span>${mode.title}</span>`;
+      if (mode.description) btn.title = mode.description;
+      btn.setAttribute('aria-pressed', mode.key === currentMode ? 'true' : 'false');
+      btn.addEventListener('click', () => {
+        if (mode.key === currentMode) return;
+        setMode(mode.key);
+      });
+      bar.appendChild(btn);
+    });
+    updateModeButtons();
+  }
+
+  function setMode(key){
+    const found = findMode(key);
+    if (!found) return false;
+    currentMode = found.key;
+    try{ localStorage.setItem('gather_mode', currentMode); }catch(_){ }
+    updateModeButtons();
+    if (state === 'idle') setBtnMiningUI(false);
+    if (!window.GatherMode) window.GatherMode = {};
+    window.GatherMode.current = currentMode;
+    return true;
+  }
+
   // -------- state --------
   let state = 'idle';   // 'idle' | 'windup' | 'mining'
   let windupTimer = null;
   let tickTimer   = null;
-  let TICK_MS = 4000;   // ритм тиков
+  let TICK_MS = 4200;   // ритм тиков
+  let lastProfile = null;
 
   function setBtnMiningUI(mining, label){
     const btn = $('btnGather'); if(!btn) return;
     btn.classList.toggle('active', !!mining);
+    btn.classList.toggle('gather-active', !!mining);
     btn.disabled = false;
-    btn.textContent = label || (mining ? '⛏️ Остановить' : '⛏️ Добывать');
+    const idleLabel = modeLabel(currentMode);
+    if (label){
+      btn.textContent = label;
+    } else if (mining){
+      const tickSec = Math.max(2, Math.round(TICK_MS/100)/10).toFixed(1);
+      btn.textContent = `⛏️ Остановить · ${tickSec}s`;
+    } else {
+      btn.textContent = idleLabel;
+    }
   }
 
   function setBtnWindupUI(ms){
@@ -152,7 +252,8 @@
     function tick(){
       const left = Math.max(0, ms - (Date.now() - started));
       const s = Math.ceil(left/100)/10; // десятые
-      btn.textContent = `⛏️ Подготовка ${s.toFixed(1)}s`;
+      const lbl = modeLabel(currentMode);
+      btn.textContent = `${lbl} · подготовка ${s.toFixed(1)}s`;
       if (left <= 0){ return; }
       windupTimer = setTimeout(tick, 80);
     }
@@ -161,11 +262,16 @@
 
   // -------- logic --------
   async function doTick(){
-    const r = await jPOST(EP.gatherTick, {});
+    const r = await jPOST(EP.gatherTick, { mode: currentMode });
     if (!r || !r.ok){
       (window.pkToast||alert)((r && (r.message||r.error)) || 'Ошибка добычи');
       stopMining(true);
       return;
+    }
+    if (r.profile) lastProfile = r.profile;
+    if (r.mode) setMode(r.mode);
+    if (r.profile && typeof r.profile.tick_ms === 'number'){
+      TICK_MS = Math.max(2000, Number(r.profile.tick_ms));
     }
     // обновим усталость мгновенно, без доп. запроса
     if (typeof r.fatigue !== 'undefined') setHUDfatigue(r.fatigue);
@@ -191,12 +297,22 @@
 
   async function startMining(){
     if (state !== 'idle') return;
-    const r = await jPOST(EP.gatherStart, {});
+    const r = await jPOST(EP.gatherStart, { mode: currentMode });
     if (!r || !r.ok){
       (window.pkToast||alert)( (r && (r.message||r.error)) || 'Нельзя начать добычу' );
       return;
     }
+    if (r.profile) lastProfile = r.profile;
+    if (Array.isArray(r.modes) && r.modes.length){
+      MODES = r.modes.slice();
+      if (!findMode(currentMode)) currentMode = (r.mode && findMode(r.mode) ? r.mode : (MODES[0] && MODES[0].key));
+      renderModeButtons();
+    }
+    if (r.mode) setMode(r.mode);
     const windup = Math.max(800, Number(r.windup_ms || 2000)); // минимум 0.8s для фидбэка
+    if (typeof r.tick_ms === 'number'){
+      TICK_MS = Math.max(2000, Number(r.tick_ms));
+    }
     state = 'windup';
     setBtnWindupUI(windup);
 
@@ -204,7 +320,7 @@
     windupTimer = setTimeout(()=>{
       if (state !== 'windup') return;  // отменено
       state = 'mining';
-      setBtnMiningUI(true, '⛏️ Остановить');
+      setBtnMiningUI(true);
       doTick(); // первый тик
       clearTimeout(tickTimer);
       tickTimer = setTimeout(doTick, TICK_MS);
@@ -216,9 +332,9 @@
     state = 'idle';
     clearTimeout(windupTimer); windupTimer = null;
     clearTimeout(tickTimer);   tickTimer = null;
-    setBtnMiningUI(false, '⛏️ Добывать');
+    setBtnMiningUI(false);
     if (!silent){
-      const r = await jPOST(EP.gatherStop, {});
+      const r = await jPOST(EP.gatherStop, { mode: currentMode });
       if (r && r.ok && r.message) (window.pkToast||alert)(r.message);
     }
   }
@@ -226,6 +342,10 @@
   function bind(){
     const btn = $('btnGather');
     if (!btn) return;
+    btn.dataset.gatherManaged = '1';
+    renderModeButtons();
+    updateModeButtons();
+    setBtnMiningUI(false);
     btn.addEventListener('click', () => {
       if (state === 'idle') startMining();
       else stopMining(false);
@@ -236,5 +356,11 @@
   else bind();
 
   // экспорт на всякий
+  window.GatherMode = window.GatherMode || {};
+  window.GatherMode.getMode = () => currentMode;
+  window.GatherMode.setMode = setMode;
+  window.GatherMode.list = () => MODES.slice();
+  window.GatherMode.current = currentMode;
+
   window.Gather = { start: startMining, stop: stopMining };
 })();

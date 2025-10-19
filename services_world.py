@@ -17,6 +17,7 @@ from world_tuning import (
     evolve_min_period_seconds,
     prefetch_cooldown_seconds,
 )
+from accounts.models import inventory_totals
 
 
 # ==================== ВСПОМОГАТЕЛЬНОЕ ====================
@@ -558,7 +559,15 @@ def _advance(row: WorldState):
 
     dt = max(0.0, now - float(row.last_update or now))
     fatigue = float(row.fatigue or 0.0)
-    step_t = _step_time(row)
+
+    try:
+        inv_uid = int(float(row.user_id))
+        load = inventory_totals(inv_uid)
+    except Exception:
+        load = {"speed_mul": 1.0, "fatigue_mul": 1.0}
+
+    load_speed_mul = float(load.get("speed_mul") or 1.0)
+    load_fatigue_mul = float(load.get("fatigue_mul") or 1.0)
 
     # Сформируем крошечный локальный контекст для текущей клетки и ближайшего шага пути
     if path:
@@ -602,6 +611,14 @@ def _advance(row: WorldState):
             path = []
             break
 
+        cxn, cyn, _, _ = _chunk_of_xy(tx, ty)
+        wch_next = _weather_for_chunk(local_ctx, cxn, cyn)
+        w_speed_mul = float(wch_next.get("speed_mul") or 1.0)
+        tile_speed_mul = tile_speed(next_tile)
+        base_speed = float(row.speed or 1.6)
+        eff_speed = max(0.12, base_speed * tile_speed_mul * w_speed_mul * load_speed_mul)
+        step_t = 1.0 / eff_speed
+
         if left_dt >= step_t:
             time_spent = step_t
             x, y = tx, ty
@@ -612,14 +629,12 @@ def _advance(row: WorldState):
             left_dt = 0.0
 
         # расход за долю шага (учёт эко-мода и локальной погоды следующей клетки)
-        cxn, cyn, _, _ = _chunk_of_xy(tx, ty)
         clim_next = _climate_cached(local_ctx, cxn, cyn)
-        wch_next  = _weather_for_chunk(local_ctx, cxn, cyn)
         w_eff, w_raw = _weather_eff_pair(wch_next)
 
         env_mul = tile_env_fatigue_mul(next_tile, clim_next, wch_next)
         base_mul = tile_fatigue_mul(next_tile)
-        cost_full_tile = _BASE_FATIGUE_PER_TILE * base_mul * env_mul * w_eff
+        cost_full_tile = _BASE_FATIGUE_PER_TILE * base_mul * env_mul * w_eff * load_fatigue_mul
 
         fatigue += cost_full_tile * (time_spent / step_t)
 
@@ -772,9 +787,22 @@ def get_world_state(user_or_id) -> Dict[str,Any]:
     w_raw         = float(weather.get("fatigue_mul", 1.0))
     w_eff, _      = _weather_eff_pair(weather)
 
-    fatigue_per_tile = _BASE_FATIGUE_PER_TILE * tile_base_mul * env_mul * w_eff
+    try:
+        load_totals = inventory_totals(uid)
+    except Exception:
+        load_totals = {"speed_mul": 1.0, "fatigue_mul": 1.0}
+
+    load_speed_mul = float(load_totals.get("speed_mul") or 1.0)
+    load_fatigue_mul = float(load_totals.get("fatigue_mul") or 1.0)
+
+    fatigue_per_tile = _BASE_FATIGUE_PER_TILE * tile_base_mul * env_mul * w_eff * load_fatigue_mul
     rest_idle_per_sec = _BASE_REST_PER_SEC * tile_rest_mul(cur) * (1.0 / w_raw)
     rest_move_per_sec = _MOVE_REST_PER_SEC * tile_rest_mul(cur) * (1.0 / w_raw)
+
+    base_speed = float(row.speed or 1.6)
+    weather_speed_mul = float(weather.get("speed_mul") or 1.0)
+    tile_speed_mul = tile_speed(cur)
+    speed_effective = base_speed * tile_speed_mul * weather_speed_mul * load_speed_mul
 
     weather_ui = dict(weather)
     weather_ui.update({
@@ -787,7 +815,11 @@ def get_world_state(user_or_id) -> Dict[str,Any]:
             "fatigue_per_tile": fatigue_per_tile,
             "rest_idle_per_sec": rest_idle_per_sec,
             "rest_move_per_sec": rest_move_per_sec,
-            "tile_speed": tile_speed(cur),
+            "tile_speed": tile_speed_mul,
+            "load_speed_mul": load_speed_mul,
+            "load_fatigue_mul": load_fatigue_mul,
+            "base_speed": base_speed,
+            "speed_effective": speed_effective,
         }
     })
 
@@ -826,7 +858,13 @@ def get_world_state(user_or_id) -> Dict[str,Any]:
         "resting": bool(row.resting),
         "camp": camp_info,
         "anim": anim,
-        "move": {"moving": bool(path), "progress": move_progress, "step_t": _step_time(row)},
+        "move": {
+            "moving": bool(path),
+            "progress": move_progress,
+            "step_t": 1.0 / max(1e-6, speed_effective),
+            "speed_effective": speed_effective,
+        },
+        "inventory": load_totals,
         "now": now
     }
 

@@ -6,6 +6,7 @@ from services_world import (
     get_world_state, set_destination, stop_hero, set_speed, build_here,
     rest_here, wake_up, camp_start, camp_leave, get_patch_view
 )
+from gathering_tables import serialize_modes, DEFAULT_MODE_KEY
 
 bp = Blueprint("world", __name__, url_prefix="/world")  # <-- ВАЖНО: __name__
 
@@ -39,6 +40,8 @@ def page():
         "world.html",
         tile_versions=_scan_tile_versions(),
         state_get_url=url_for("world.api_state_get"),
+        gather_modes=serialize_modes(),
+        gather_default_mode=DEFAULT_MODE_KEY,
     )
 
 

@@ -87,6 +87,27 @@ def _q(x: float, step: float) -> int:
     return int(_clamp(x, 0.0, 1.0) / step) if step > 0 else int(x)
 
 # ---------------- main picker ----------------
+def _feels_like(temp_c: float, wind_mps: float, humidity: float) -> float:
+    """Грубая оценка ощущаемой температуры."""
+    t = temp_c
+    h = _clamp(humidity / 100.0, 0.0, 1.0)
+    wind = max(0.0, wind_mps)
+
+    if t <= 10.0:
+        # ветер усиливает холод
+        chill = 13.12 + 0.6215 * t - 11.37 * (wind ** 0.16) + 0.3965 * t * (wind ** 0.16)
+        return round(chill, 1)
+
+    # жару усиливает влажность
+    heat_idx = t
+    if t >= 27.0 and h >= 0.4:
+        heat_idx = -8.784695 + 1.61139411 * t + 2.338549 * (h * 100) - 0.14611605 * t * (h * 100)
+        heat_idx += -0.012308094 * (t ** 2) - 0.016424828 * ((h * 100) ** 2)
+        heat_idx += 0.002211732 * (t ** 2) * (h * 100) + 0.00072546 * t * ((h * 100) ** 2)
+        heat_idx += -0.000003582 * (t ** 2) * ((h * 100) ** 2)
+    return round(heat_idx, 1)
+
+
 def pick_weather_for_chunk(climate: Dict[str,float],
                            urbanization: float,
                            now_bucket: float,
@@ -210,38 +231,70 @@ def pick_weather_for_chunk(climate: Dict[str,float],
                 key_choice = k; break
             acc += w
 
-    speed_mul   = 1.0
-    fatigue_mul = 1.0
+    # Базовые модификаторы скорости/усталости от факторов
+    base_speed_penalty = (precip_field * 0.18) + (fog_field * 0.05) + (storm_field * 0.28)
+    base_fatigue_penalty = wetness * 0.22 + abs(temp_anom - 0.5) * 0.18
+
+    speed_mul   = 1.0 - base_speed_penalty
+    fatigue_mul = 1.0 + base_fatigue_penalty
     precip      = "none"
     notes       = []
 
     if key_choice == "rain":
         speed_mul   *= 0.92
-        fatigue_mul *= 1.20
-        precip = "rain"
-    elif key_choice == "snow":
-        speed_mul   *= 0.78
         fatigue_mul *= 1.18
+        precip = "rain"
+        notes.append("мокрый грунт")
+    elif key_choice == "snow":
+        speed_mul   *= 0.76
+        fatigue_mul *= 1.22
         precip = "snow"
+        notes.append("снежный покров")
     elif key_choice == "storm":
-        speed_mul   *= 0.84
-        fatigue_mul *= 1.28
-        notes.append("сильный ветер/ливень")
+        speed_mul   *= 0.80
+        fatigue_mul *= 1.30
+        notes.append("штормовые порывы")
     elif key_choice == "fog":
         speed_mul   *= 0.97
         notes.append("видимость ниже")
     elif key_choice == "heat":
-        speed_mul   *= 0.95
-        fatigue_mul *= 1.32
+        speed_mul   *= 0.94
+        fatigue_mul *= 1.35
+        notes.append("изнуряющая жара")
+
+    humidity_pct = _clamp((m * 0.65 + precip_field * 0.7 + fog_field * 0.4) * 100.0, 8.0, 100.0)
+    wind_mps = max(0.2, 1.5 + storm_field * 8.0 + w_wind * 4.0)
+    visibility = max(0.4, 8.0 - fog_field * 5.0 - precip_field * 3.0 - (storm_field * 4.0))
+    temp_c = _lerp(-28.0, 40.0, t_eff2)
+    feels_c = _feels_like(temp_c, wind_mps, humidity_pct)
+
+    comfort = "комфортно"
+    if feels_c <= -10:
+        comfort = "ледяной холод"
+    elif feels_c <= 0:
+        comfort = "холодно"
+    elif feels_c >= 32:
+        comfort = "экстремальная жара"
+    elif feels_c >= 26:
+        comfort = "жарко"
 
     out = {
         "ok": True,
         "key": key_choice,
+        "id": key_choice,
         "name": key_choice,
-        "speed_mul": round(speed_mul, 3),
-        "fatigue_mul": round(fatigue_mul, 3),
+        "speed_mul": round(max(0.35, speed_mul), 3),
+        "fatigue_mul": round(max(0.6, fatigue_mul), 3),
         "precip": precip,
         "notes": "; ".join(notes) if notes else "",
+        "metrics": {
+            "temperature_c": round(temp_c, 1),
+            "feels_like_c": feels_c,
+            "humidity_pct": round(humidity_pct, 1),
+            "wind_mps": round(wind_mps, 1),
+            "visibility_km": round(visibility, 1),
+            "comfort": comfort,
+        },
         "fields": {
             "precip": round(precip_field, 3),
             "storm":  round(storm_field, 3),
