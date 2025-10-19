@@ -282,12 +282,15 @@ def ensure_monsters_for_view(user_id: int, hero_x: int, hero_y: int, patch: Dict
     )
 
     # Подтягиваем статы под игрока
+    retuned = False
     for row in existing:
         if row.state != "engaged":
             _retune_monster(row, sheet)
+            retuned = True
 
     active = [row for row in existing if row.state != "defeated"]
 
+    spawned = False
     if len(active) < min(len(candidates), _MAX_NEAR_MONSTERS):
         needed = min(_MAX_NEAR_MONSTERS, len(candidates)) - len(active)
         taken_coords = {(m.x, m.y) for m in active}
@@ -300,6 +303,9 @@ def ensure_monsters_for_view(user_id: int, hero_x: int, hero_y: int, patch: Dict
             taken_coords.add((x, y))
             active.append(monster)
             needed -= 1
+            spawned = True
+
+    if retuned or spawned:
         db.session.commit()
 
     active.sort(key=lambda m: max(abs(int(m.x) - hero_x), abs(int(m.y) - hero_y)))
