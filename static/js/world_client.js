@@ -343,6 +343,12 @@
     btn.style.background = active ? '#ef4444' : '#1f6feb';
   }
 
+  function gatherModeKey(){
+    const gm = window.GatherMode;
+    if (gm && typeof gm.getMode === 'function'){ try{ return gm.getMode(); }catch(_){ return gm.current; } }
+    return (window.WORLD_BOOT && window.WORLD_BOOT.gatherDefaultMode) || 'forage';
+  }
+
   async function gatherTick(){
     if (!S.gatherActive) return;
     const s = LAST_STATE || {};
@@ -350,12 +356,16 @@
     const weather = (s.weather && (s.weather.key || s.weather.name)) || 'clear';
     const climate = lastClimateKey(s);
 
-    const j = await apiPOST(ENDPOINTS.gatherTick, { tile, weather, climate });
+    const payload = { tile, weather, climate, mode: gatherModeKey() };
+    const j = await apiPOST(ENDPOINTS.gatherTick, payload);
     if (!j || !j.ok){
       pkToast('Добыча: ошибка');
       S.gatherActive = false;
       setGatherUI(false);
       return;
+    }
+    if (j.mode && window.GatherMode && typeof window.GatherMode.setMode === 'function'){
+      try{ window.GatherMode.setMode(j.mode); }catch(_){ window.GatherMode.current = j.mode; }
     }
     // обновим усталость в HUD, если есть
     if (typeof j.fatigue === 'number'){
@@ -384,8 +394,11 @@
   async function startGather(){
     if (S.campHere){ pkToast('Сверните лагерь для добычи'); return; }
     if (S.anim && S.anim.moving){ pkToast('Остановитесь, чтобы начать добычу'); return; }
-    const r = await apiPOST(ENDPOINTS.gatherStart);
+    const r = await apiPOST(ENDPOINTS.gatherStart, { mode: gatherModeKey() });
     if (!r || !r.ok){ pkToast('Не удалось начать добычу'); return; }
+    if (r.mode && window.GatherMode && typeof window.GatherMode.setMode === 'function'){
+      try{ window.GatherMode.setMode(r.mode); }catch(_){ window.GatherMode.current = r.mode; }
+    }
     S.gatherActive = true;
     setGatherUI(true);
     clearTimeout(S.gatherTimer);
@@ -396,7 +409,7 @@
     S.gatherTimer = null;
     S.gatherActive = false;
     setGatherUI(false);
-    await apiPOST(ENDPOINTS.gatherStop).catch(()=>{});
+    await apiPOST(ENDPOINTS.gatherStop, { mode: gatherModeKey() }).catch(()=>{});
   }
   function toggleGather(){ S.gatherActive ? stopGather() : startGather(); }
 

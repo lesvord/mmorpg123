@@ -159,6 +159,7 @@
     <button class="btn camp" id="btnCamp" type="button">🏕️ Лагерь</button>
   </div>
 </section>
+<div class="gather-mode-bar" id="gatherModeBar" role="group" aria-label="Режим добычи"></div>
 
 <!-- ======= нижняя навигация ======= -->
 <nav class="tabbar" id="tabbar" role="tablist" aria-label="Навигация">
@@ -225,7 +226,9 @@
       gatherStart: "{{ url_for('world_resources.gather_start') }}",
       gatherStop:  "{{ url_for('world_resources.gather_stop') }}",
       gatherTick:  "{{ url_for('world_resources.gather_tick') }}"
-    }
+    },
+    gatherModes: {{ gather_modes|tojson|safe }},
+    gatherDefaultMode: "{{ gather_default_mode }}"
   };
 </script>
 

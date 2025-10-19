@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
-from typing import Dict, Tuple, Optional
+from typing import Optional, Tuple
 
 from flask import Blueprint, request, jsonify, g
 
@@ -11,29 +10,16 @@ from models import db
 from world_models import ensure_world_models, WorldState
 from accounts.models import ItemDef, give_item, inventory_totals
 from routes_world import get_world_state  # авторитетное состояние (тайл/погода/усталость)
+from gathering_tables import (
+    DEFAULT_MODE_KEY,
+    DropK,
+    normalize_mode,
+    serialize_modes,
+)
+
+FALLBACK_BIOME = "grass"
 
 bp = Blueprint("world_resources", __name__, url_prefix="/world")
-
-# ---------- дроп-таблицы (биом -> ключи ItemDef) ----------
-@dataclass(frozen=True)
-class DropK:
-    key: str
-    w: int
-
-BIOMES: Dict[str, Tuple[DropK, ...]] = {
-    "grass":  (DropK("res_stick", 9),  DropK("res_fiber", 7),   DropK("res_berries", 5), DropK("res_herb", 3),   DropK("res_stone", 3)),
-    "forest": (DropK("res_stick",10),  DropK("res_wood_log", 6),DropK("res_mushroom",5), DropK("res_berries",4), DropK("res_stone",2)),
-    "swamp":  (DropK("res_reed", 8),   DropK("res_clay", 6),    DropK("res_peat", 5),    DropK("res_mushroom",3),DropK("res_fish",2)),
-    "rock":   (DropK("res_stone", 9),  DropK("res_copper_ore",5),DropK("res_iron_ore",4), DropK("res_gold_nug",1),DropK("res_gem",1)),
-    "sand":   (DropK("res_sand",10),   DropK("res_stone", 3),   DropK("res_cactus", 3),  DropK("res_gold_nug",1)),
-    "desert": (DropK("res_sand",10),   DropK("res_cactus", 4),  DropK("res_stone", 3),   DropK("res_gold_nug",1)),
-    "water":  (DropK("res_fish", 6),   DropK("res_reed", 6),    DropK("res_sand", 2)),
-    "snow":   (DropK("res_ice", 8),    DropK("res_stone", 3),   DropK("res_berries",1)),
-    "lava":   (DropK("res_obsidian",2),DropK("res_stone", 4),   DropK("res_gem", 1)),
-    "road":   (DropK("res_stick", 3),  DropK("res_stone", 3)),
-    "town": tuple(), "tavern": tuple(), "camp": tuple(),
-}
-FALLBACK_BIOME = "grass"
 
 BASE_MISS = 0.40  # базовый шанс промаха
 
@@ -64,7 +50,8 @@ def _uid() -> Optional[int]:
 def _resolve_biome(tile_id: Optional[str]) -> str:
     if not tile_id:
         return FALLBACK_BIOME
-    return (tile_id.split("_", 1)[0].strip().lower()) or FALLBACK_BIOME
+    base = (tile_id.split("_", 1)[0].strip().lower()) or FALLBACK_BIOME
+    return base
 
 def _miss_chance(weather_kind: str, biome: str) -> float:
     w = (weather_kind or "").lower()
@@ -137,7 +124,7 @@ def _add_global_fatigue(uid: int, dv: float) -> float:
     return cur
 
 # ---------- основной тик ----------
-def _gather_tick(uid: int):
+def _gather_tick(uid: int, mode_key: str = DEFAULT_MODE_KEY):
     """
     Один тик добычи:
       - списываем базовую цену (fatigue_per_tile × GATHER_BASE_FACTOR),
@@ -153,11 +140,13 @@ def _gather_tick(uid: int):
     fatigue_per_tile = float(mods.get("fatigue_per_tile") or 0.8)  # «цена шага»
     base_cost = fatigue_per_tile * GATHER_BASE_FACTOR              # «цена тика добычи»
 
+    mode = normalize_mode(mode_key)
+
     cur_fat = float(ws.get("fatigue") or 0.0)
     if cur_fat >= 100.0 - 1e-6:
         return {
             "ok": True, "items": [], "message": "Вы выдохлись.",
-            "fatigue": cur_fat, "totals": inventory_totals(uid)
+            "fatigue": cur_fat, "totals": inventory_totals(uid), "mode": mode.key
         }
 
     # запретная зона — только base_cost
@@ -166,7 +155,7 @@ def _gather_tick(uid: int):
         return {
             "ok": True, "items": [], "message": "Здесь нечего добывать.",
             "fatigue": new_fat, "fatigue_base": base_cost, "fatigue_extra": 0.0,
-            "totals": inventory_totals(uid)
+            "totals": inventory_totals(uid), "mode": mode.key
         }
 
     # промах — только base_cost
@@ -175,11 +164,11 @@ def _gather_tick(uid: int):
         return {
             "ok": True, "items": [], "message": "Ничего не найдено.",
             "fatigue": new_fat, "fatigue_base": base_cost, "fatigue_extra": 0.0,
-            "totals": inventory_totals(uid)
+            "totals": inventory_totals(uid), "mode": mode.key
         }
 
     # успех: 1 предмет ×1
-    table = BIOMES.get(biome) or BIOMES[FALLBACK_BIOME]
+    table = mode.table_for(biome)
     key = _weighted_pick(table)
 
     if not key:
@@ -187,7 +176,7 @@ def _gather_tick(uid: int):
         return {
             "ok": True, "items": [], "message": "Ничего не найдено.",
             "fatigue": new_fat, "fatigue_base": base_cost, "fatigue_extra": 0.0,
-            "totals": inventory_totals(uid)
+            "totals": inventory_totals(uid), "mode": mode.key
         }
 
     # пробуем положить в БД-инвентарь
@@ -199,7 +188,7 @@ def _gather_tick(uid: int):
         return {
             "ok": True, "items": [], "message": human, "error": msg,
             "fatigue": new_fat, "fatigue_base": base_cost, "fatigue_extra": 0.0,
-            "totals": inventory_totals(uid)
+            "totals": inventory_totals(uid), "mode": mode.key
         }
 
     # успех: base_cost + вес
@@ -219,11 +208,13 @@ def _gather_tick(uid: int):
             "weight_kg": round(kg, 3),
             "icon": icon
         }],
-        "message": f"Добыто: {name} ×1 ({kg:.2f} кг)",
+        "message": f"{mode.title}: {name} ×1 ({kg:.2f} кг)",
         "fatigue": new_fat,
         "fatigue_base": round(base_cost, 4),
         "fatigue_extra": round(extra, 4),
         "totals": inventory_totals(uid),
+        "mode": mode.key,
+        "mode_title": mode.title,
     }
 
 # ---------- endpoints ----------
@@ -232,14 +223,24 @@ def gather():
     uid = _uid()
     if not uid:
         return jsonify({"ok": False, "error": "auth_required"}), 401
-    return jsonify(_gather_tick(uid))
+    data = request.get_json(silent=True) or {}
+    mode_key = data.get("mode") or DEFAULT_MODE_KEY
+    return jsonify(_gather_tick(uid, mode_key))
 
 @bp.post("/gather/start")
 def gather_start():
-    if not _uid():
+    uid = _uid()
+    if not uid:
         return jsonify({"ok": False, "error": "auth_required"}), 401
-    # можно динамически менять windup, например, от биома/инструмента
-    return jsonify({"ok": True, "message": "Добыча начата", "windup_ms": DEFAULT_WINDUP_MS})
+    data = request.get_json(silent=True) or {}
+    mode = normalize_mode(data.get("mode"))
+    return jsonify({
+        "ok": True,
+        "message": "Добыча начата",
+        "windup_ms": DEFAULT_WINDUP_MS,
+        "mode": mode.key,
+        "modes": serialize_modes(),
+    })
 
 @bp.post("/gather/stop")
 def gather_stop():
@@ -252,4 +253,6 @@ def gather_tick():
     uid = _uid()
     if not uid:
         return jsonify({"ok": False, "error": "auth_required"}), 401
-    return jsonify(_gather_tick(uid))
+    data = request.get_json(silent=True) or {}
+    mode_key = data.get("mode") or DEFAULT_MODE_KEY
+    return jsonify(_gather_tick(uid, mode_key))

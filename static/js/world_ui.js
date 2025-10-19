@@ -163,6 +163,28 @@
       #controlsBar .btn-stop{order:2}
       #controlsBar .btn-camp{order:3}
 
+      .gather-mode-bar{
+        display:flex; flex-wrap:wrap; gap:8px; justify-content:center;
+        padding:0 10px; margin-top:6px;
+      }
+      .gather-mode-bar .mode-btn{
+        border-radius:999px; border:1px solid rgba(255,255,255,.18);
+        background:rgba(255,255,255,.05);
+        color:#fff; font:600 13px/1.1 system-ui;
+        padding:8px 12px; display:flex; align-items:center; gap:6px;
+        cursor:pointer; transition:background .15s,border-color .15s,transform .15s;
+      }
+      .gather-mode-bar .mode-btn .ico{font-size:16px;line-height:1}
+      .gather-mode-bar .mode-btn.active{
+        background:#1f6feb; border-color:#3b82f6; box-shadow:0 4px 14px rgba(31,111,235,.45);
+        transform:translateY(-1px);
+      }
+      .gather-mode-bar .mode-btn:focus-visible{outline:2px solid #3b82f6; outline-offset:2px}
+      @media (max-width:420px){
+        .gather-mode-bar{gap:6px}
+        .gather-mode-bar .mode-btn{font-size:12px; padding:6px 10px}
+      }
+
       /* === Отдельная строка для "Добывать" под #controlsBar === */
       #mineBar{margin-top:8px;padding:0 10px}
       #mineBar .btn{
